@@ -217,4 +217,87 @@ int audio_start(int volume)
     want.samples  = 2048;
     want.callback = callback;
 
-    g_dev
+    g_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+    if (!g_dev) {
+        printf("%-14s %s\n", "AUDIO FAIL", SDL_GetError());
+        SDL_FreeWAV(g_wav);
+        g_wav = NULL;
+        if (g_fx_buf) {
+            SDL_FreeWAV(g_fx_buf);
+            g_fx_buf = NULL;
+            g_fx     = NULL;
+        }
+        return 0;
+    }
+
+    SDL_PauseAudioDevice(g_dev, 0);
+    printf("%-14s %d Hz, %d ch, %+d dB\n", "Audio",
+           want.freq, want.channels, (volume - 3) * 3);
+    return 1;
+}
+
+void audio_stop(void)
+{
+    if (g_dev) {
+        SDL_CloseAudioDevice(g_dev);
+        g_dev = 0;
+    }
+    if (g_wav) {
+        SDL_FreeWAV(g_wav);
+        g_wav = NULL;
+    }
+    if (g_fx_buf) {
+        SDL_FreeWAV(g_fx_buf);
+        g_fx_buf = NULL;
+        g_fx     = NULL;
+    }
+}
+
+void audio_flicker(int32_t pi, int32_t pj, double x, double z)
+{
+    int v, slot = -1;
+
+    if (!g_dev || !g_fx)
+        return;
+
+    SDL_LockAudioDevice(g_dev);
+    for (v = 0; v < MAX_VOICES; v++) {
+        if (g_voice[v].active && g_voice[v].pi == pi && g_voice[v].pj == pj) {
+            SDL_UnlockAudioDevice(g_dev);
+            return;
+        }
+        if (!g_voice[v].active && slot < 0)
+            slot = v;
+    }
+    if (slot >= 0) {
+        g_voice[slot].pi     = pi;
+        g_voice[slot].pj     = pj;
+        g_voice[slot].x      = x;
+        g_voice[slot].z      = z;
+        g_voice[slot].pos    = 0.0;
+        g_voice[slot].gain   = 0.0f;
+        g_voice[slot].active = 1;
+    }
+    SDL_UnlockAudioDevice(g_dev);
+}
+
+void audio_listener(double x, double z)
+{
+    double d, t;
+    int v;
+
+    if (!g_dev || !g_fx)
+        return;
+
+    SDL_LockAudioDevice(g_dev);
+    for (v = 0; v < MAX_VOICES; v++) {
+        if (!g_voice[v].active)
+            continue;
+        d = hypot(g_voice[v].x - x, g_voice[v].z - z);
+        t = 1.0 - d / FLICKER_RANGE;
+        if (t < 0.0)
+            t = 0.0;
+        g_voice[v].gain = (float)(t * t);
+    }
+    SDL_UnlockAudioDevice(g_dev);
+}
