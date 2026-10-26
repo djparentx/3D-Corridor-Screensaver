@@ -16,7 +16,7 @@ struct voice {
     int     active;
     int32_t pi, pj;
     double  x, z;
-    Uint32  pos;
+    double  pos;      /* fractional frame position in fx */
     float   gain;
 };
 
@@ -25,43 +25,65 @@ static int           g_freq;
 static int           g_channels;
 static Uint8        *g_wav;
 static Uint32        g_len;
-static Uint32        g_loop;
-static Uint32        g_pos;
-static Sint16       *g_fx;
-static Uint32        g_fx_len;
+static Uint32        g_loop;       /* samples (interleaved) */
+static Uint32        g_pos;        /* samples (interleaved) */
+static Uint8        *g_fx_buf;
+static const Sint16 *g_fx;
+static Uint32        g_fx_frames;
+static int           g_fx_ch;
+static double        g_fx_step;
 static float         g_gain;
 static struct voice  g_voice[MAX_VOICES];
+
+/* linear interpolation between neighbouring fx frames */
+static float fx_sample(const struct voice *vc, int c)
+{
+    Uint32 i  = (Uint32)vc->pos;
+    float  t  = (float)(vc->pos - (double)i);
+    int    ch = c % g_fx_ch;
+    float  a  = (float)g_fx[i * (Uint32)g_fx_ch + (Uint32)ch];
+    float  b  = (float)g_fx[(i + 1) * (Uint32)g_fx_ch + (Uint32)ch];
+
+    return a + (b - a) * t;
+}
 
 /* hum loop + flicker one-shots, master gain */
 static void callback(void *ud, Uint8 *stream, int len)
 {
-    Sint16       *out = (Sint16 *)stream;
-    const Sint16 *hum = (const Sint16 *)g_wav;
-    Uint32        pos = g_pos;
-    int           n   = len / 2, i, v;
+    Sint16       *out    = (Sint16 *)stream;
+    const Sint16 *hum    = (const Sint16 *)g_wav;
+    int           frames = len / 2 / g_channels;
+    Uint32        pos    = g_pos;
+    int           f, c, v;
     float         s;
 
     (void)ud;
 
-    for (i = 0; i < n; i++) {
-        s = (float)hum[pos];
-        if (++pos >= g_loop)
+    for (f = 0; f < frames; f++) {
+        for (c = 0; c < g_channels; c++) {
+            s = (float)hum[pos + (Uint32)c];
+
+            for (v = 0; v < MAX_VOICES; v++)
+                if (g_voice[v].active)
+                    s += fx_sample(&g_voice[v], c) * g_voice[v].gain;
+
+            s *= g_gain;
+            if (s >  32767.0f) s =  32767.0f;
+            if (s < -32768.0f) s = -32768.0f;
+            *out++ = (Sint16)s;
+        }
+
+        pos += (Uint32)g_channels;
+        if (pos >= g_loop)
             pos = 0;
 
         for (v = 0; v < MAX_VOICES; v++) {
-            struct voice *vc = &g_voice[v];
-
-            if (!vc->active)
+            if (!g_voice[v].active)
                 continue;
-            s += (float)g_fx[vc->pos] * vc->gain;
-            if (++vc->pos >= g_fx_len)
-                vc->active = 0;
+            g_voice[v].pos += g_fx_step;
+            if (g_voice[v].pos >= (double)(g_fx_frames - 1))
+                g_voice[v].active = 0;
         }
-
-        s *= g_gain;
-        if (s >  32767.0f) s =  32767.0f;
-        if (s < -32768.0f) s = -32768.0f;
-        out[i] = (Sint16)s;
     }
     g_pos = pos;
 }
@@ -97,58 +119,58 @@ static void crossfade_loop(int channels, int freq)
     g_loop = keep * (Uint32)channels;
 }
 
-/* load faulty.wav and convert it to the hum's rate/channels, 16-bit */
+static void print_peak(const char *label, const Sint16 *s, Uint32 count)
+{
+    Uint32 i;
+    int    a, peak = 0;
+
+    for (i = 0; i < count; i++) {
+        a = s[i] < 0 ? -(int)s[i] : (int)s[i];
+        if (a > peak)
+            peak = a;
+    }
+    if (peak == 0)
+        printf("%-14s %s\n", label, "silent");
+    else
+        printf("%-14s %.1f dBFS\n", label, 20.0 * log10((double)peak / 32768.0));
+}
+
+/* faulty.wav stays at its own rate; resampled in the callback */
 static int load_fx(void)
 {
     SDL_AudioSpec spec;
-    SDL_AudioCVT  cvt;
     SDL_RWops    *rw;
-    Uint8        *buf;
     Uint32        len;
 
     rw = SDL_RWFromConstMem(faulty_wav_start, (int)(faulty_wav_end - faulty_wav_start));
-    if (!rw || !SDL_LoadWAV_RW(rw, 1, &spec, &buf, &len)) {
+    if (!rw || !SDL_LoadWAV_RW(rw, 1, &spec, &g_fx_buf, &len)) {
         printf("%-14s %s\n", "FX FAIL", SDL_GetError());
+        g_fx_buf = NULL;
         return 0;
     }
 
-    if (SDL_BuildAudioCVT(&cvt, spec.format, spec.channels, spec.freq,
-                          AUDIO_S16LSB, (Uint8)g_channels, g_freq) < 0) {
-        printf("%-14s %s\n", "FX FAIL", SDL_GetError());
-        SDL_FreeWAV(buf);
+    if (spec.format != AUDIO_S16LSB || spec.channels < 1) {
+        printf("%-14s %s\n", "FX FAIL", "wav must be 16-bit PCM");
+        SDL_FreeWAV(g_fx_buf);
+        g_fx_buf = NULL;
         return 0;
     }
 
-    cvt.len = (int)len;
-    cvt.buf = SDL_malloc((size_t)len * (size_t)cvt.len_mult);
-    if (!cvt.buf) {
-        printf("%-14s %s\n", "FX FAIL", "out of memory");
-        SDL_FreeWAV(buf);
-        return 0;
-    }
-    SDL_memcpy(cvt.buf, buf, len);
-    SDL_FreeWAV(buf);
+    g_fx        = (const Sint16 *)g_fx_buf;
+    g_fx_ch     = spec.channels;
+    g_fx_frames = len / 2 / (Uint32)g_fx_ch;
+    g_fx_step   = (double)spec.freq / (double)g_freq;
 
-    if (cvt.needed) {
-        if (SDL_ConvertAudio(&cvt) != 0) {
-            printf("%-14s %s\n", "FX FAIL", SDL_GetError());
-            SDL_free(cvt.buf);
-            return 0;
-        }
-    } else {
-        cvt.len_cvt = cvt.len;
-    }
-
-    g_fx     = (Sint16 *)cvt.buf;
-    g_fx_len = (Uint32)cvt.len_cvt / 2;
-    if (g_fx_len == 0) {
-        SDL_free(g_fx);
-        g_fx = NULL;
+    if (g_fx_frames < 2) {
+        SDL_FreeWAV(g_fx_buf);
+        g_fx_buf = NULL;
+        g_fx     = NULL;
         return 0;
     }
 
-    printf("%-14s %d Hz -> %d Hz, %.1f s\n", "Flicker FX",
-           spec.freq, g_freq, (float)g_fx_len / (float)(g_freq * g_channels));
+    printf("%-14s %d Hz, %d ch, %.1f s, step %.3f\n", "Flicker FX",
+           spec.freq, g_fx_ch, (float)g_fx_frames / (float)spec.freq, g_fx_step);
+    print_peak("FX peak", g_fx, g_fx_frames * (Uint32)g_fx_ch);
     return 1;
 }
 
@@ -181,6 +203,7 @@ int audio_start(int volume)
     g_freq     = wav.freq;
     g_channels = wav.channels;
     crossfade_loop(wav.channels, wav.freq);
+    print_peak("Hum peak", (const Sint16 *)g_wav, g_loop);
     load_fx();
 
     g_gain = powf(10.0f, (float)((volume - 3) * 3) / 20.0f);
@@ -194,85 +217,4 @@ int audio_start(int volume)
     want.samples  = 2048;
     want.callback = callback;
 
-    g_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
-    if (!g_dev) {
-        printf("%-14s %s\n", "AUDIO FAIL", SDL_GetError());
-        SDL_FreeWAV(g_wav);
-        g_wav = NULL;
-        if (g_fx) {
-            SDL_free(g_fx);
-            g_fx = NULL;
-        }
-        return 0;
-    }
-
-    SDL_PauseAudioDevice(g_dev, 0);
-    printf("%-14s %d Hz, %d ch, %+d dB\n", "Audio",
-           want.freq, want.channels, (volume - 3) * 3);
-    return 1;
-}
-
-void audio_stop(void)
-{
-    if (g_dev) {
-        SDL_CloseAudioDevice(g_dev);
-        g_dev = 0;
-    }
-    if (g_wav) {
-        SDL_FreeWAV(g_wav);
-        g_wav = NULL;
-    }
-    if (g_fx) {
-        SDL_free(g_fx);
-        g_fx = NULL;
-    }
-}
-
-void audio_flicker(int32_t pi, int32_t pj, double x, double z)
-{
-    int v, slot = -1;
-
-    if (!g_dev || !g_fx)
-        return;
-
-    SDL_LockAudioDevice(g_dev);
-    for (v = 0; v < MAX_VOICES; v++) {
-        if (g_voice[v].active && g_voice[v].pi == pi && g_voice[v].pj == pj) {
-            SDL_UnlockAudioDevice(g_dev);
-            return;
-        }
-        if (!g_voice[v].active && slot < 0)
-            slot = v;
-    }
-    if (slot >= 0) {
-        g_voice[slot].pi     = pi;
-        g_voice[slot].pj     = pj;
-        g_voice[slot].x      = x;
-        g_voice[slot].z      = z;
-        g_voice[slot].pos    = 0;
-        g_voice[slot].gain   = 0.0f;
-        g_voice[slot].active = 1;
-    }
-    SDL_UnlockAudioDevice(g_dev);
-}
-
-void audio_listener(double x, double z)
-{
-    double d, t;
-    int v;
-
-    if (!g_dev || !g_fx)
-        return;
-
-    SDL_LockAudioDevice(g_dev);
-    for (v = 0; v < MAX_VOICES; v++) {
-        if (!g_voice[v].active)
-            continue;
-        d = hypot(g_voice[v].x - x, g_voice[v].z - z);
-        t = 1.0 - d / FLICKER_RANGE;
-        if (t < 0.0)
-            t = 0.0;
-        g_voice[v].gain = (float)(t * t);
-    }
-    SDL_UnlockAudioDevice(g_dev);
-}
+    g_dev
