@@ -22,7 +22,7 @@ jobs:
 
       - name: Check size
         run: |
-          size=$(stat -c %s 3D_Backrooms)
+          size=$(stat -c %s 3D_Corridors)
           printf '%-14s %s bytes\n' "Binary size" "$size"
           if [ "$size" -gt 1048576 ]; then
             printf '%-14s %s\n' "ERROR" "binary exceeds 1MB"
@@ -30,9 +30,16 @@ jobs:
           fi
 
       - name: Show dependencies
-        run: readelf -d 3D_Backrooms | grep NEEDED
+        run: readelf -d 3D_Corridors | grep NEEDED
+
+      - name: Package
+        run: |
+          mkdir -p dist/3D_Corridors
+          cp 3D_Corridors dist/3D_Corridors/
+          cp "scripts/3D Corridors.sh" dist/
+          chmod +x dist/3D_Corridors/3D_Corridors "dist/3D Corridors.sh"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: 3D_Backrooms
-          path: 3D_Backrooms
+          name: 3D_Corridors
+          path: dist/

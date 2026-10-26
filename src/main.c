@@ -21,6 +21,7 @@
 #define Z_NEAR         0.1f
 #define Z_FAR          80.0f
 #define INPUT_GRACE    500
+#define MAX_EVENTS     8
 
 #define FOG_R          0.34f
 #define FOG_G          0.32f
@@ -179,6 +180,8 @@ int main(int argc, char **argv)
     int32_t ccx, ccz;
     float amb, dt, now, frac_x, frac_z, lo_x, lo_z;
     int w, h, i, v, frames = 0;
+    struct flicker_event ev[MAX_EVENTS];
+    int nev, k;
 
     signal(SIGTERM, on_signal);
     signal(SIGINT, on_signal);
@@ -208,7 +211,7 @@ int main(int argc, char **argv)
 
     SDL_GetCurrentDisplayMode(0, &dm);
 
-    win = SDL_CreateWindow("3D_Backrooms", 0, 0, dm.w, dm.h,
+    win = SDL_CreateWindow("3D_Corridors", 0, 0, dm.w, dm.h,
                            SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN);
     if (!win) {
         printf("%-14s %s\n", "WINDOW FAIL", SDL_GetError());
@@ -337,6 +340,11 @@ int main(int argc, char **argv)
         gl.ActiveTexture(GL_TEXTURE1);
         light_update(cam_x, cam_z, now, &lo_x, &lo_z);
         gl.ActiveTexture(GL_TEXTURE0);
+
+        nev = light_flicker_events(cam_x, cam_z, now, FLICKER_RANGE, ev, MAX_EVENTS);
+        for (k = 0; k < nev; k++)
+            audio_flicker(ev[k].i, ev[k].j, ev[k].x, ev[k].z);
+        audio_listener(cam_x, cam_z);
 
         mat4_translate(trans, 0.0f, -(EYE_HEIGHT + walker_bob(&wk)), 0.0f);
         mat4_rotate_y(rot, -wk.yaw);
