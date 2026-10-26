@@ -23,6 +23,7 @@
     X(PFNGLDELETETEXTURESPROC,           DeleteTextures) \
     X(PFNGLDEPTHFUNCPROC,                DepthFunc) \
     X(PFNGLDISABLEPROC,                  Disable) \
+    X(PFNGLDISABLEVERTEXATTRIBARRAYPROC, DisableVertexAttribArray) \
     X(PFNGLDRAWARRAYSPROC,               DrawArrays) \
     X(PFNGLDRAWELEMENTSPROC,             DrawElements) \
     X(PFNGLENABLEPROC,                   Enable) \
