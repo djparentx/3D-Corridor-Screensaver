@@ -42,6 +42,7 @@
     X(PFNGLSHADERSOURCEPROC,             ShaderSource) \
     X(PFNGLTEXIMAGE2DPROC,               TexImage2D) \
     X(PFNGLTEXPARAMETERIPROC,            TexParameteri) \
+    X(PFNGLTEXSUBIMAGE2DPROC,            TexSubImage2D) \
     X(PFNGLUNIFORM1FPROC,                Uniform1f) \
     X(PFNGLUNIFORM1IPROC,                Uniform1i) \
     X(PFNGLUNIFORM2FPROC,                Uniform2f) \

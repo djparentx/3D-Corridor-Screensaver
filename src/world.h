@@ -10,6 +10,7 @@
 #define CHUNK_RADIUS  2
 #define CHUNK_SPAN    (CHUNK_RADIUS * 2 + 1)
 #define CHUNK_SLOTS   (CHUNK_SPAN * CHUNK_SPAN)
+#define WALL_VARIANTS 3
 
 enum chunk_type {
     CHUNK_OPEN,
@@ -30,7 +31,8 @@ struct chunk {
     /* [z][x]: pillar on the north-west corner of cell (x,z) */
     uint8_t      pillar[CHUNK_CELLS][CHUNK_CELLS];
     unsigned int vbo, ibo;
-    int          index_count;
+    int          idx_start[WALL_VARIANTS];
+    int          idx_count[WALL_VARIANTS];
 };
 
 void          world_init(uint32_t seed);

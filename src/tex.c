@@ -2,33 +2,20 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "hash.h"
 #include "tex.h"
 
-#define WALL_W   256    /* 1.0 m  */
+#define WALL_W   512    /* 2.0 m  */
 #define WALL_H   512    /* 2.7 m  */
 #define FLOOR_W  256    /* 2.0 m  */
 #define CEIL_W   256    /* 2.0 m  */
-
-static uint32_t ihash(uint32_t x)
-{
-    x ^= x >> 16;
-    x *= 0x7FEB352Du;
-    x ^= x >> 15;
-    x *= 0x846CA68Bu;
-    x ^= x >> 16;
-    return x;
-}
-
-static uint32_t hash2(int x, int y, uint32_t salt)
-{
-    return ihash((uint32_t)x * 73856093u ^ ihash((uint32_t)y * 19349663u ^ salt));
-}
+#define BASE_PX  23     /* 0.12 m baseboard */
 
 static float lattice(int x, int y, int per_x, int per_y, uint32_t salt)
 {
     x = ((x % per_x) + per_x) % per_x;
     y = ((y % per_y) + per_y) % per_y;
-    return (float)(hash2(x, y, salt) & 0xFFFF) / 65535.0f;
+    return (float)(hash_2i(x, y, salt) & 0xFFFF) / 65535.0f;
 }
 
 static float smoothstepf(float e0, float e1, float x)
@@ -105,22 +92,81 @@ static GLuint upload(const uint8_t *data, int w, int h, GLint wrap_t)
     return id;
 }
 
-/* row 0 = floor level */
-static void gen_wall(uint8_t *buf)
+/* stain 0: faint blotches */
+static float stain_blotch(int x, int y)
 {
-    const int base_px = 23;     /* 0.12 m baseboard */
+    float v = fbm((float)x, (float)y, 128, WALL_W, WALL_H, 3, 23u);
+
+    return 0.12f * smoothstepf(0.60f, 0.74f, v);
+}
+
+/* stain 1: drips running down from the ceiling */
+static float stain_drip(int x, int y)
+{
+    const int lane  = 16;
+    const int lanes = WALL_W / lane;
+    float best = 0.0f;
+    int k;
+
+    for (k = -1; k <= 1; k++) {
+        int col = x / lane + k;
+        uint32_t h;
+        float cx, w, len, t, dist, core, halo, amt;
+
+        if (col < 0 || col >= lanes)
+            continue;
+
+        h = hash_2i(col, 0, 71u);
+        if ((h & 255u) >= 70u)
+            continue;
+
+        cx  = (float)(col * lane) + 4.0f + (float)((h >> 8) & 7u);
+        cx += 1.5f * sinf((float)y * 0.045f + (float)(h & 63u));
+        w   = 2.0f + (float)((h >> 11) & 3u);
+        len = 90.0f + (float)((h >> 13) & 255u);
+        t   = (float)(WALL_H - 1 - y) / len;
+        if (t >= 1.0f)
+            continue;
+
+        dist = fabsf((float)x - cx);
+        core = 1.0f - smoothstepf(0.0f, w, dist);
+        halo = 1.0f - smoothstepf(w, w * 2.5f, dist);
+        amt  = powf(1.0f - t, 1.4f) * (0.22f * core + 0.06f * halo);
+        if (amt > best)
+            best = amt;
+    }
+    return best;
+}
+
+/* stain 2: rising damp with a tide line */
+static float stain_damp(int x, int y)
+{
+    float line = (float)BASE_PX + 55.0f
+               + 75.0f * vnoise((float)x, 0.0f, 64, WALL_W, 64, 83u)
+               + 10.0f * vnoise((float)x, 0.0f, 16, WALL_W, 16, 89u);
+    float fy    = (float)y;
+    float patch = fbm((float)x, (float)y, 64, WALL_W, WALL_H, 3, 97u);
+    float below = 1.0f - smoothstepf(line - 6.0f, line, fy);
+    float edge  = 1.0f - smoothstepf(0.0f, 3.5f, fabsf(fy - line));
+
+    return (0.08f + 0.08f * patch) * below + 0.16f * edge;
+}
+
+/* row 0 = floor level */
+static void gen_wall(uint8_t *buf, int variant)
+{
     int x, y, cx, cy, dx;
-    float n, stain, m, d, r, g, b;
+    float n, m, d, r, g, b, edge, s;
 
     for (y = 0; y < WALL_H; y++) {
         for (x = 0; x < WALL_W; x++) {
-            uint8_t *p = buf + (y * WALL_W + x) * 3;
+            uint8_t *p = buf + ((size_t)y * WALL_W + x) * 3;
 
             n = fbm((float)x, (float)y, 32, WALL_W, WALL_H, 4, 11u);
 
-            if (y < base_px) {
+            if (y < BASE_PX) {
                 m = 0.92f + 0.12f * n;
-                if (y >= base_px - 2)
+                if (y >= BASE_PX - 2)
                     m *= 1.12f;
                 put(p, 0.56f * m, 0.48f * m, 0.35f * m);
                 continue;
@@ -145,15 +191,22 @@ static void gen_wall(uint8_t *buf)
                 b *= 0.97f;
             }
 
-            /* faint stains */
-            stain = smoothstepf(0.60f, 0.74f,
-                                fbm((float)x, (float)y, 128, WALL_W, WALL_H, 3, 23u));
-            m *= 1.0f - 0.10f * stain;
-            b *= 1.0f - 0.08f * stain;
+            /* stains fade out near segment edges so variants join cleanly */
+            edge = smoothstepf(0.0f, 48.0f, (float)x) *
+                   smoothstepf(0.0f, 48.0f, (float)(WALL_W - 1 - x));
+
+            switch (variant) {
+            case 0:  s = stain_blotch(x, y); break;
+            case 1:  s = stain_drip(x, y);   break;
+            default: s = stain_damp(x, y);   break;
+            }
+            s *= edge;
+            m *= 1.0f - s;
+            b *= 1.0f - 0.6f * s;
 
             /* grime above baseboard, shadow below ceiling */
-            if (y < base_px + 40)
-                m *= 0.92f + 0.08f * (float)(y - base_px) / 40.0f;
+            if (y < BASE_PX + 40)
+                m *= 0.92f + 0.08f * (float)(y - BASE_PX) / 40.0f;
             if (y > WALL_H - 10)
                 m *= 0.92f;
 
@@ -169,10 +222,10 @@ static void gen_carpet(uint8_t *buf)
 
     for (y = 0; y < FLOOR_W; y++) {
         for (x = 0; x < FLOOR_W; x++) {
-            uint8_t *p = buf + (y * FLOOR_W + x) * 3;
+            uint8_t *p = buf + ((size_t)y * FLOOR_W + x) * 3;
 
             n      = fbm((float)x, (float)y, 64, FLOOR_W, FLOOR_W, 5, 37u);
-            grain  = (float)(hash2(x, y, 41u) & 255) / 255.0f;
+            grain  = (float)(hash_2i(x, y, 41u) & 255u) / 255.0f;
             blotch = smoothstepf(0.58f, 0.72f,
                                  fbm((float)x, (float)y, 128, FLOOR_W, FLOOR_W, 3, 53u));
 
@@ -192,7 +245,7 @@ static void gen_ceiling(uint8_t *buf)
 
     for (y = 0; y < CEIL_W; y++) {
         for (x = 0; x < CEIL_W; x++) {
-            uint8_t *p = buf + (y * CEIL_W + x) * 3;
+            uint8_t *p = buf + ((size_t)y * CEIL_W + x) * 3;
 
             n = fbm((float)x, (float)y, 32, CEIL_W, CEIL_W, 3, 61u);
 
@@ -203,7 +256,7 @@ static void gen_ceiling(uint8_t *buf)
                 continue;
             }
 
-            h = hash2(x, y, 67u) & 1023u;
+            h = hash_2i(x, y, 67u) & 1023u;
             m = 0.95f + 0.06f * n;
             if (h < 40u)
                 m *= 0.84f;
@@ -218,14 +271,17 @@ static void gen_ceiling(uint8_t *buf)
 void tex_create(struct textures *t)
 {
     uint8_t *buf = malloc((size_t)WALL_W * WALL_H * 3);
+    int v;
 
     if (!buf) {
         printf("%-14s %s\n", "TEX ERROR", "out of memory");
         exit(1);
     }
 
-    gen_wall(buf);
-    t->wall = upload(buf, WALL_W, WALL_H, GL_CLAMP_TO_EDGE);
+    for (v = 0; v < WALL_VARIANTS; v++) {
+        gen_wall(buf, v);
+        t->wall[v] = upload(buf, WALL_W, WALL_H, GL_CLAMP_TO_EDGE);
+    }
 
     gen_carpet(buf);
     t->carpet = upload(buf, FLOOR_W, FLOOR_W, GL_REPEAT);
@@ -238,7 +294,7 @@ void tex_create(struct textures *t)
 
 void tex_destroy(struct textures *t)
 {
-    gl.DeleteTextures(1, &t->wall);
+    gl.DeleteTextures(WALL_VARIANTS, t->wall);
     gl.DeleteTextures(1, &t->carpet);
     gl.DeleteTextures(1, &t->ceiling);
 }
