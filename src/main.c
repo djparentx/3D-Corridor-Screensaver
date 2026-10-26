@@ -87,14 +87,73 @@ static GLuint build_program(const char *vs, const char *fs)
     return p;
 }
 
-static int is_exit_event(const SDL_Event *e)
+static const char *safe_name(const char *s)
+{
+    return s ? s : "unknown";
+}
+
+/* mapped devices send controller events; others send raw joystick events */
+static void open_controllers(void)
+{
+    int i;
+
+    for (i = 0; i < SDL_NumJoysticks(); i++) {
+        if (SDL_IsGameController(i) && SDL_GameControllerOpen(i))
+            printf("%-14s %s (mapped)\n", "Controller",
+                   safe_name(SDL_GameControllerNameForIndex(i)));
+        else if (SDL_JoystickOpen(i))
+            printf("%-14s %s (raw)\n", "Controller",
+                   safe_name(SDL_JoystickNameForIndex(i)));
+    }
+}
+
+/* d-pad / arrow left-right turn; anything else returns 1 (exit) */
+static int handle_input(const SDL_Event *e, struct walker *wk)
 {
     switch (e->type) {
     case SDL_QUIT:
-    case SDL_KEYDOWN:
-    case SDL_JOYBUTTONDOWN:
         return 1;
+
+    case SDL_KEYDOWN:
+        if (e->key.repeat)
+            return 0;
+        if (e->key.keysym.sym == SDLK_LEFT) {
+            walker_turn(wk, -1);
+            return 0;
+        }
+        if (e->key.keysym.sym == SDLK_RIGHT) {
+            walker_turn(wk, 1);
+            return 0;
+        }
+        return 1;
+
+    case SDL_CONTROLLERBUTTONDOWN:
+        if (e->cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_LEFT) {
+            walker_turn(wk, -1);
+            return 0;
+        }
+        if (e->cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
+            walker_turn(wk, 1);
+            return 0;
+        }
+        return 1;
+
+    case SDL_JOYBUTTONDOWN:
+        if (SDL_GameControllerFromInstanceID(e->jbutton.which))
+            return 0;
+        return 1;
+
     case SDL_JOYHATMOTION:
+        if (SDL_GameControllerFromInstanceID(e->jhat.which))
+            return 0;
+        if (e->jhat.value == SDL_HAT_LEFT) {
+            walker_turn(wk, -1);
+            return 0;
+        }
+        if (e->jhat.value == SDL_HAT_RIGHT) {
+            walker_turn(wk, 1);
+            return 0;
+        }
         return e->jhat.value != SDL_HAT_CENTERED;
     }
     return 0;
@@ -110,16 +169,15 @@ int main(int argc, char **argv)
     struct wall_prog wp;
     struct textures tex;
     struct chunk *chunks;
+    struct walker wk;
+    struct settings cfg;
     GLuint quad_vbo;
     Uint64 freq, t_prev, t_now;
     Uint32 t_start, seed;
     float proj[16], rot[16], trans[16], view[16], vp[16];
     double cam_x = 1.0, cam_z = 1.0;
     int32_t ccx, ccz;
-    struct walker wk;
-    struct settings cfg;
-    float amb;
-    float dt, now, frac_x, frac_z, lo_x, lo_z;
+    float amb, dt, now, frac_x, frac_z, lo_x, lo_z;
     int w, h, i, v, frames = 0;
 
     signal(SIGTERM, on_signal);
@@ -129,13 +187,12 @@ int main(int argc, char **argv)
     settings_print(&cfg);
     amb = 0.1f + 0.9f * (float)cfg.ambient / 100.0f;
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) != 0) {
         printf("%-14s %s\n", "SDL_Init FAIL", SDL_GetError());
         return 1;
     }
 
-    for (i = 0; i < SDL_NumJoysticks(); i++)
-        SDL_JoystickOpen(i);
+    open_controllers();
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
@@ -216,7 +273,7 @@ int main(int argc, char **argv)
 
     /* unit 1 = light panel states, unit 0 = material */
     gl.ActiveTexture(GL_TEXTURE1);
-    light_init(cfg.panels, cfg.flicker);
+    light_init(cfg.panels, cfg.flicker, cfg.brightness);
     gl.ActiveTexture(GL_TEXTURE0);
     tex_create(&tex);
 
@@ -255,7 +312,9 @@ int main(int argc, char **argv)
         SDL_Event e;
 
         while (SDL_PollEvent(&e)) {
-            if (is_exit_event(&e) && SDL_GetTicks() - t_start > INPUT_GRACE)
+            if (SDL_GetTicks() - t_start <= INPUT_GRACE)
+                continue;
+            if (handle_input(&e, &wk))
                 g_running = 0;
         }
 
@@ -352,8 +411,8 @@ int main(int argc, char **argv)
     printf("%-14s %.1f\n", "Average FPS",
            frames * 1000.0f / (float)(SDL_GetTicks() - t_start));
 
-    world_free();
     audio_stop();
+    world_free();
     tex_destroy(&tex);
     light_free();
     gl.DeleteBuffers(1, &quad_vbo);

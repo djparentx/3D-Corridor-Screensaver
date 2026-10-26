@@ -47,12 +47,13 @@ void settings_parse(struct settings *s, int argc, char **argv)
 {
     int i;
 
-    s->speed   = 1.0f;
-    s->ambient = 100;
-    s->panels  = 1;
-    s->flicker = 1;
-    s->fog     = 1;
-    s->volume  = 3;
+    s->speed      = 1.0f;
+    s->ambient    = 100;
+    s->panels     = 1;
+    s->flicker    = 1;
+    s->fog        = 1;
+    s->volume     = 3;
+    s->brightness = 100;
 
     for (i = 1; i < argc; i++) {
         const char *a   = argv[i];
@@ -76,6 +77,9 @@ void settings_parse(struct settings *s, int argc, char **argv)
         } else if (!strcmp(a, "--volume")) {
             s->volume = parse_int(a, val, 0, 5, s->volume);
             i++;
+        } else if (!strcmp(a, "--brightness")) {
+            s->brightness = parse_int(a, val, 0, 100, s->brightness);
+            i++;
         } else {
             printf("%-14s unknown argument '%s'\n", "ARG WARNING", a);
         }
@@ -84,10 +88,11 @@ void settings_parse(struct settings *s, int argc, char **argv)
 
 void settings_print(const struct settings *s)
 {
-    printf("%-14s %.1f\n", "Speed",   s->speed);
-    printf("%-14s %d\n",   "Ambient", s->ambient);
-    printf("%-14s %d\n",   "Panels",  s->panels);
-    printf("%-14s %d\n",   "Flicker", s->flicker);
-    printf("%-14s %d\n",   "Fog",     s->fog);
-    printf("%-14s %d\n",   "Volume",  s->volume);
+    printf("%-14s %.1f\n", "Speed",      s->speed);
+    printf("%-14s %d\n",   "Ambient",    s->ambient);
+    printf("%-14s %d\n",   "Panels",     s->panels);
+    printf("%-14s %d\n",   "Flicker",    s->flicker);
+    printf("%-14s %d\n",   "Fog",        s->fog);
+    printf("%-14s %d\n",   "Volume",     s->volume);
+    printf("%-14s %d\n",   "Brightness", s->brightness);
 }

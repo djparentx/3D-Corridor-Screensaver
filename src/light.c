@@ -7,10 +7,12 @@
 
 #define PANELS_PER_CHUNK  ((int32_t)(CHUNK_SIZE / PANEL_SPACING))
 
-static GLuint  g_tex;
-static uint8_t g_buf[LIGHT_TEX_SIZE * LIGHT_TEX_SIZE];
+static GLuint   g_tex;
+static uint8_t  g_buf[LIGHT_TEX_SIZE * LIGHT_TEX_SIZE];
 static uint32_t g_dead_max    = 82u;
 static uint32_t g_flicker_max = 123u;
+static float    g_bright      = 1.0f;
+
 static float panel_level(int32_t i, int32_t j, float time)
 {
     uint32_t h = hash_2i(i, j, 0x51ED27u);
@@ -35,10 +37,12 @@ static float panel_level(int32_t i, int32_t j, float time)
 }
 
 /* call with the light texture unit active */
-void light_init(int panels, int flicker)
+void light_init(int panels, int flicker, int brightness)
 {
     g_dead_max    = 82u * (uint32_t)panels;
     g_flicker_max = g_dead_max + 41u * (uint32_t)flicker;
+    g_bright      = 0.25f + 0.75f * (float)brightness / 100.0f;
+
     gl.GenTextures(1, &g_tex);
     gl.BindTexture(GL_TEXTURE_2D, g_tex);
     gl.TexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, LIGHT_TEX_SIZE, LIGHT_TEX_SIZE,
@@ -63,7 +67,7 @@ void light_update(double cam_x, double cam_z, float time,
     for (z = 0; z < LIGHT_TEX_SIZE; z++)
         for (x = 0; x < LIGHT_TEX_SIZE; x++)
             g_buf[z * LIGHT_TEX_SIZE + x] =
-                (uint8_t)(panel_level(oi + x, oj + z, time) * 255.0f + 0.5f);
+                (uint8_t)(panel_level(oi + x, oj + z, time) * g_bright * 255.0f + 0.5f);
 
     gl.BindTexture(GL_TEXTURE_2D, g_tex);
     gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, LIGHT_TEX_SIZE, LIGHT_TEX_SIZE,
