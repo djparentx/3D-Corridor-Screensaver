@@ -9,19 +9,20 @@
 
 static GLuint  g_tex;
 static uint8_t g_buf[LIGHT_TEX_SIZE * LIGHT_TEX_SIZE];
-
+static uint32_t g_dead_max    = 82u;
+static uint32_t g_flicker_max = 123u;
 static float panel_level(int32_t i, int32_t j, float time)
 {
     uint32_t h = hash_2i(i, j, 0x51ED27u);
     uint32_t r = h & 1023u;
     int32_t  slow, fast;
 
-    /* ~8% dead */
-    if (r < 82u)
+    /* dead: ~8% x panels setting */
+    if (r < g_dead_max)
         return 0.10f;
 
-    /* ~4% flickering: stutters in random 2 s bursts */
-    if (r < 123u) {
+    /* flickering: ~4% x flicker setting, stutters in random 2 s bursts */
+    if (r < g_flicker_max) {
         slow = (int32_t)floorf(time * 0.5f);
         if ((hash_2i((int32_t)h, slow, 0x9B0568u) & 3u) != 0u)
             return 1.0f;
@@ -34,8 +35,10 @@ static float panel_level(int32_t i, int32_t j, float time)
 }
 
 /* call with the light texture unit active */
-void light_init(void)
+void light_init(int panels, int flicker)
 {
+    g_dead_max    = 82u * (uint32_t)panels;
+    g_flicker_max = g_dead_max + 41u * (uint32_t)flicker;
     gl.GenTextures(1, &g_tex);
     gl.BindTexture(GL_TEXTURE_2D, g_tex);
     gl.TexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, LIGHT_TEX_SIZE, LIGHT_TEX_SIZE,

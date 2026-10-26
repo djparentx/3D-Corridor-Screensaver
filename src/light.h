@@ -8,7 +8,7 @@
 #define PANEL_SPACING   4.0f    /* metres between panels; divides CHUNK_SIZE */
 #define PANEL_OFFSET    1.0f    /* panel centre offset from grid origin */
 
-void   light_init(void);
+void   light_init(int panels, int flicker);
 void   light_update(double cam_x, double cam_z, float time,
                     float *origin_x, float *origin_z);
 void   light_free(void);

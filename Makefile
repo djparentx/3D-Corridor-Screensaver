@@ -5,9 +5,10 @@ LDFLAGS += -s
 LDLIBS  := $(shell sdl2-config --libs) -lm
 
 SRC := $(wildcard src/*.c)
-OBJ := $(SRC:.c=.o)
+OBJ := $(SRC:.c=.o) src/hum.o
 HDR := $(wildcard src/*.h)
 BIN := 3D_Backrooms
+WAV := assets/light-hum.wav
 
 all: $(BIN)
 
@@ -16,6 +17,9 @@ $(BIN): $(OBJ)
 
 src/%.o: src/%.c $(HDR)
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+src/hum.o: src/hum.S $(WAV)
+	$(CC) -c -o $@ $<
 
 clean:
 	rm -f $(OBJ) $(BIN)

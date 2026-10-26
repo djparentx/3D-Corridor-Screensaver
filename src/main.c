@@ -12,6 +12,8 @@
 #include "tex.h"
 #include "light.h"
 #include "walker.h"
+#include "settings.h"
+#include "audio.h"
 
 #define EYE_HEIGHT     1.6f
 #define PLANE_SIZE     80.0f
@@ -98,7 +100,7 @@ static int is_exit_event(const SDL_Event *e)
     return 0;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     static const float quad[] = { -1, -1,  1, -1,  -1, 1,  1, 1 };
     SDL_DisplayMode dm;
@@ -115,11 +117,17 @@ int main(void)
     double cam_x = 1.0, cam_z = 1.0;
     int32_t ccx, ccz;
     struct walker wk;
+    struct settings cfg;
+    float amb;
     float dt, now, frac_x, frac_z, lo_x, lo_z;
     int w, h, i, v, frames = 0;
 
     signal(SIGTERM, on_signal);
     signal(SIGINT, on_signal);
+
+    settings_parse(&cfg, argc, argv);
+    settings_print(&cfg);
+    amb = 0.1f + 0.9f * (float)cfg.ambient / 100.0f;
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) != 0) {
         printf("%-14s %s\n", "SDL_Init FAIL", SDL_GetError());
@@ -208,7 +216,7 @@ int main(void)
 
     /* unit 1 = light panel states, unit 0 = material */
     gl.ActiveTexture(GL_TEXTURE1);
-    light_init();
+    light_init(cfg.panels, cfg.flicker);
     gl.ActiveTexture(GL_TEXTURE0);
     tex_create(&tex);
 
@@ -219,7 +227,8 @@ int main(void)
     gl.Uniform1i(pp.light, 1);
     gl.Uniform3f(pp.eye, 0.0f, EYE_HEIGHT, 0.0f);
     gl.Uniform3f(pp.fog, FOG_R, FOG_G, FOG_B);
-    gl.Uniform1f(pp.fogk, FOG_K);
+    gl.Uniform1f(pp.fogk, FOG_K * (float)cfg.fog);
+    gl.Uniform1f(gl.GetUniformLocation(pp.id, "u_ambient"), amb);
 
     gl.UseProgram(wp.id);
     gl.Uniform2f(wp.uvscale, 1.0f / WALL_TEX_WIDTH, 1.0f / CEIL_HEIGHT);
@@ -227,7 +236,8 @@ int main(void)
     gl.Uniform1i(wp.light, 1);
     gl.Uniform3f(wp.eye, 0.0f, EYE_HEIGHT, 0.0f);
     gl.Uniform3f(wp.fog, FOG_R, FOG_G, FOG_B);
-    gl.Uniform1f(wp.fogk, FOG_K);
+    gl.Uniform1f(wp.fogk, FOG_K * (float)cfg.fog);
+    gl.Uniform1f(gl.GetUniformLocation(wp.id, "u_ambient"), amb);
 
     mat4_perspective(proj, FOV_DEG * (float)M_PI / 180.0f,
                      (float)w / (float)h, Z_NEAR, Z_FAR);
@@ -235,6 +245,7 @@ int main(void)
     world_init(seed);
     world_update(cam_x, cam_z);
     walker_init(&wk, cam_x, cam_z, seed);
+    audio_start(cfg.volume);
 
     freq    = SDL_GetPerformanceFrequency();
     t_prev  = SDL_GetPerformanceCounter();
@@ -253,7 +264,7 @@ int main(void)
         t_prev = t_now;
         now    = (float)(SDL_GetTicks() - t_start) / 1000.0f;
 
-        walker_update(&wk, dt);
+        walker_update(&wk, dt * cfg.speed);
         cam_x = wk.x;
         cam_z = wk.z;
 
@@ -342,6 +353,7 @@ int main(void)
            frames * 1000.0f / (float)(SDL_GetTicks() - t_start));
 
     world_free();
+    audio_stop();
     tex_destroy(&tex);
     light_free();
     gl.DeleteBuffers(1, &quad_vbo);

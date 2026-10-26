@@ -8,6 +8,7 @@
     "uniform sampler2D u_light;\n" \
     "uniform vec2 u_frac;\n" \
     "uniform vec2 u_lorigin;\n" \
+    "uniform float u_ambient;\n" \
     "float level_at(vec2 g) {\n" \
     "  return texture2D(u_light, (g - u_lorigin + 0.5) / 32.0).r;\n" \
     "}\n" \
@@ -16,8 +17,13 @@
     "  vec2 n = floor(g + 0.5);\n" \
     "  vec2 dp = pw - (n * 4.0 + 1.0);\n" \
     "  float dy = 2.7 - rel.y;\n" \
-    "  float glow = level_at(n) * exp(-(dot(dp, dp) + dy * dy) * 0.7);\n" \
-    "  return vec3(1.0, 0.97, 0.86) * (0.30 + 0.70 * level_at(g) + 0.45 * glow);\n" \
+    "  float ln = level_at(n);\n" \
+    "  vec2 a = 1.0 - smoothstep(0.0, 2.0, abs(dp));\n" \
+    "  float pool = ln * a.x * a.y;\n" \
+    "  float glow = ln * exp(-(dot(dp, dp) + dy * dy) * 0.7);\n" \
+    "  float fill = 0.30 + 0.70 * level_at(g);\n" \
+    "  return vec3(1.0, 0.97, 0.86) *\n" \
+    "         (fill * u_ambient + pool * (1.0 - u_ambient) + 0.45 * glow);\n" \
     "}\n"
 
 #define HASH_GLSL \
