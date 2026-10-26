@@ -20,6 +20,7 @@ enum chunk_type {
     CHUNK_TYPES
 };
 
+enum dir { DIR_N, DIR_E, DIR_S, DIR_W };
 struct chunk {
     int          valid;
     int32_t      cx, cz;
@@ -39,5 +40,6 @@ void          world_init(uint32_t seed);
 void          world_update(double cam_x, double cam_z);
 struct chunk *world_chunks(void);
 void          world_free(void);
+int           world_open(int32_t gx, int32_t gz, int dir);
 
 #endif

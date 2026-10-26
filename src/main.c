@@ -11,9 +11,9 @@
 #include "mesh.h"
 #include "tex.h"
 #include "light.h"
+#include "walker.h"
 
 #define EYE_HEIGHT     1.6f
-#define WALK_SPEED     1.2f
 #define PLANE_SIZE     80.0f
 #define FOV_DEG        70.0f
 #define Z_NEAR         0.1f
@@ -114,7 +114,8 @@ int main(void)
     float proj[16], rot[16], trans[16], view[16], vp[16];
     double cam_x = 1.0, cam_z = 1.0;
     int32_t ccx, ccz;
-    float yaw = 0.0f, dt, now, frac_x, frac_z, lo_x, lo_z;
+    struct walker wk;
+    float dt, now, frac_x, frac_z, lo_x, lo_z;
     int w, h, i, v, frames = 0;
 
     signal(SIGTERM, on_signal);
@@ -230,9 +231,10 @@ int main(void)
 
     mat4_perspective(proj, FOV_DEG * (float)M_PI / 180.0f,
                      (float)w / (float)h, Z_NEAR, Z_FAR);
-    mat4_translate(trans, 0.0f, -EYE_HEIGHT, 0.0f);
 
     world_init(seed);
+    world_update(cam_x, cam_z);
+    walker_init(&wk, cam_x, cam_z, seed);
 
     freq    = SDL_GetPerformanceFrequency();
     t_prev  = SDL_GetPerformanceCounter();
@@ -251,8 +253,9 @@ int main(void)
         t_prev = t_now;
         now    = (float)(SDL_GetTicks() - t_start) / 1000.0f;
 
-        cam_x -= sin(yaw) * WALK_SPEED * dt;
-        cam_z -= cos(yaw) * WALK_SPEED * dt;
+        walker_update(&wk, dt);
+        cam_x = wk.x;
+        cam_z = wk.z;
 
         world_update(cam_x, cam_z);
 
@@ -265,7 +268,8 @@ int main(void)
         light_update(cam_x, cam_z, now, &lo_x, &lo_z);
         gl.ActiveTexture(GL_TEXTURE0);
 
-        mat4_rotate_y(rot, -yaw);
+        mat4_translate(trans, 0.0f, -(EYE_HEIGHT + walker_bob(&wk)), 0.0f);
+        mat4_rotate_y(rot, -wk.yaw);
         mat4_mul(view, rot, trans);
         mat4_mul(vp, proj, view);
 

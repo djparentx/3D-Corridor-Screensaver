@@ -266,3 +266,39 @@ void world_free(void)
         g_slots[i].valid = 0;
     }
 }
+
+static int32_t floor_div_cells(int32_t a)
+{
+    return a >= 0 ? a / CHUNK_CELLS : -((-a + CHUNK_CELLS - 1) / CHUNK_CELLS);
+}
+
+static const struct chunk *cell_chunk(int32_t gx, int32_t gz, int *lx, int *lz)
+{
+    int32_t cx = floor_div_cells(gx);
+    int32_t cz = floor_div_cells(gz);
+
+    *lx = (int)(gx - cx * CHUNK_CELLS);
+    *lz = (int)(gz - cz * CHUNK_CELLS);
+    return find_chunk(cx, cz);
+}
+
+/* 1 if cell (gx,gz) connects to its neighbour in dir and both are loaded */
+int world_open(int32_t gx, int32_t gz, int dir)
+{
+    static const int dx[4] = { 0, 1, 0, -1 };
+    static const int dz[4] = { -1, 0, 1, 0 };
+    const struct chunk *c, *n;
+    int lx, lz, nlx, nlz;
+
+    c = cell_chunk(gx, gz, &lx, &lz);
+    n = cell_chunk(gx + dx[dir], gz + dz[dir], &nlx, &nlz);
+    if (!c || !n)
+        return 0;
+
+    switch (dir) {
+    case DIR_N: return !c->wall_n[lz][lx];
+    case DIR_E: return !n->wall_w[nlz][nlx];
+    case DIR_S: return !n->wall_n[nlz][nlx];
+    default:    return !c->wall_w[lz][lx];
+    }
+}
