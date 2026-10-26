@@ -9,6 +9,7 @@
 #include "shaders.h"
 #include "world.h"
 #include "mesh.h"
+#include "tex.h"
 
 #define EYE_HEIGHT     1.6f
 #define WALK_SPEED     1.2f
@@ -26,12 +27,12 @@
 
 struct plane_prog {
     GLuint id;
-    GLint  vp, size, y, frac, eye, tint, fog;
+    GLint  vp, size, y, frac, eye, fog, tex, scale;
 };
 
 struct wall_prog {
     GLuint id;
-    GLint  vp, offset, eye, tint, fog;
+    GLint  vp, offset, eye, fog, tex, uvscale;
 };
 
 static volatile sig_atomic_t g_running = 1;
@@ -105,6 +106,7 @@ int main(void)
     struct wall_prog wp;
     struct chunk *chunks;
     GLuint quad_vbo;
+    struct textures tex;
     Uint64 freq, t_prev, t_now;
     Uint32 t_start, seed;
     float proj[16], rot[16], trans[16], view[16], vp[16];
@@ -164,21 +166,23 @@ int main(void)
     printf("%-14s %s\n",          "GL version",  gl.GetString(GL_VERSION));
     printf("%-14s %u\n",          "World seed",  seed);
 
-    pp.id   = build_program(plane_vs, plane_fs);
-    pp.vp   = gl.GetUniformLocation(pp.id, "u_vp");
-    pp.size = gl.GetUniformLocation(pp.id, "u_size");
-    pp.y    = gl.GetUniformLocation(pp.id, "u_y");
-    pp.frac = gl.GetUniformLocation(pp.id, "u_frac");
-    pp.eye  = gl.GetUniformLocation(pp.id, "u_eye");
-    pp.tint = gl.GetUniformLocation(pp.id, "u_tint");
-    pp.fog  = gl.GetUniformLocation(pp.id, "u_fog");
+    pp.id    = build_program(plane_vs, plane_fs);
+    pp.vp    = gl.GetUniformLocation(pp.id, "u_vp");
+    pp.size  = gl.GetUniformLocation(pp.id, "u_size");
+    pp.y     = gl.GetUniformLocation(pp.id, "u_y");
+    pp.frac  = gl.GetUniformLocation(pp.id, "u_frac");
+    pp.eye   = gl.GetUniformLocation(pp.id, "u_eye");
+    pp.fog   = gl.GetUniformLocation(pp.id, "u_fog");
+    pp.tex   = gl.GetUniformLocation(pp.id, "u_tex");
+    pp.scale = gl.GetUniformLocation(pp.id, "u_scale");
 
-    wp.id     = build_program(wall_vs, wall_fs);
-    wp.vp     = gl.GetUniformLocation(wp.id, "u_vp");
-    wp.offset = gl.GetUniformLocation(wp.id, "u_offset");
-    wp.eye    = gl.GetUniformLocation(wp.id, "u_eye");
-    wp.tint   = gl.GetUniformLocation(wp.id, "u_tint");
-    wp.fog    = gl.GetUniformLocation(wp.id, "u_fog");
+    wp.id      = build_program(wall_vs, wall_fs);
+    wp.vp      = gl.GetUniformLocation(wp.id, "u_vp");
+    wp.offset  = gl.GetUniformLocation(wp.id, "u_offset");
+    wp.eye     = gl.GetUniformLocation(wp.id, "u_eye");
+    wp.fog     = gl.GetUniformLocation(wp.id, "u_fog");
+    wp.tex     = gl.GetUniformLocation(wp.id, "u_tex");
+    wp.uvscale = gl.GetUniformLocation(wp.id, "u_uvscale");
 
     gl.GenBuffers(1, &quad_vbo);
     gl.BindBuffer(GL_ARRAY_BUFFER, quad_vbo);
@@ -189,15 +193,21 @@ int main(void)
     gl.Enable(GL_DEPTH_TEST);
     gl.ClearColor(FOG_R, FOG_G, FOG_B, 1.0f);
 
+    gl.ActiveTexture(GL_TEXTURE0);
+    tex_create(&tex);
+
     gl.UseProgram(pp.id);
     gl.Uniform3f(pp.fog, FOG_R, FOG_G, FOG_B);
     gl.Uniform3f(pp.eye, 0.0f, EYE_HEIGHT, 0.0f);
     gl.Uniform1f(pp.size, PLANE_SIZE);
+    gl.Uniform1i(pp.tex, 0);
+    gl.Uniform1f(pp.scale, 1.0f / FLOOR_TEX_SIZE);
 
     gl.UseProgram(wp.id);
     gl.Uniform3f(wp.fog, FOG_R, FOG_G, FOG_B);
     gl.Uniform3f(wp.eye, 0.0f, EYE_HEIGHT, 0.0f);
-    gl.Uniform3f(wp.tint, 0.80f, 0.76f, 0.52f);
+    gl.Uniform1i(wp.tex, 0);
+    gl.Uniform2f(wp.uvscale, 1.0f / WALL_TEX_WIDTH, 1.0f / CEIL_HEIGHT);
 
     mat4_perspective(proj, FOV_DEG * (float)M_PI / 180.0f,
                      (float)w / (float)h, Z_NEAR, Z_FAR);
@@ -235,21 +245,23 @@ int main(void)
         /* floor + ceiling */
         gl.UseProgram(pp.id);
         gl.UniformMatrix4fv(pp.vp, 1, GL_FALSE, vp);
-        gl.Uniform2f(pp.frac, (float)fmod(cam_x, 2.0), (float)fmod(cam_z, 2.0));
+        gl.Uniform2f(pp.frac, (float)fmod(cam_x, CHUNK_SIZE),
+                              (float)fmod(cam_z, CHUNK_SIZE));
         gl.BindBuffer(GL_ARRAY_BUFFER, quad_vbo);
         gl.VertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (const void *)0);
 
         gl.Uniform1f(pp.y, 0.0f);
-        gl.Uniform3f(pp.tint, 0.55f, 0.47f, 0.33f);
+        gl.BindTexture(GL_TEXTURE_2D, tex.carpet);
         gl.DrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         gl.Uniform1f(pp.y, CEIL_HEIGHT);
-        gl.Uniform3f(pp.tint, 0.85f, 0.84f, 0.72f);
+        gl.BindTexture(GL_TEXTURE_2D, tex.ceiling);
         gl.DrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         /* walls */
         gl.UseProgram(wp.id);
         gl.UniformMatrix4fv(wp.vp, 1, GL_FALSE, vp);
+        gl.BindTexture(GL_TEXTURE_2D, tex.wall);
         gl.EnableVertexAttribArray(1);
         gl.EnableVertexAttribArray(2);
 
@@ -287,6 +299,7 @@ int main(void)
            frames * 1000.0f / (float)(SDL_GetTicks() - t_start));
 
     world_free();
+    tex_destroy(&tex);
     gl.DeleteBuffers(1, &quad_vbo);
     gl.DeleteProgram(pp.id);
     gl.DeleteProgram(wp.id);
