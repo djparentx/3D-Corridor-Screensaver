@@ -440,7 +440,7 @@ int audio_start(int volume)
     if (!g_phone_rng)
         g_phone_rng = 1;
     g_phone_next_check = SDL_GetTicks() + PHONE_INTERVAL_MS;
-    g_knock_next_check = SDL_GetTicks() + 30000;
+    g_knock_next_check = SDL_GetTicks() + 3000;
 	
     SDL_zero(want);
     want.freq     = wav.freq;
@@ -538,7 +538,7 @@ void audio_listener(double x, double z, int knock_eligible)
 
     SDL_LockAudioDevice(g_dev);
     if ((Sint32)(SDL_GetTicks() - g_knock_next_check) >= 0) {
-        g_knock_next_check = SDL_GetTicks() + 30000;
+        g_knock_next_check = SDL_GetTicks() + 3000;
         if (g_knock && knock_eligible && knock_random() % 100 < 100) {
             g_knock_pos = 0.0;
             g_knock_active = 1;
