@@ -108,8 +108,20 @@ static void open_controllers(void)
     }
 }
 
-/* d-pad / arrow left-right turn; anything else returns 1 (exit) */
-static int handle_input(const SDL_Event *e, struct walker *wk)
+/* d-pad up/down: speed +/- 0.1, kept within 0.5 - 1.5 */
+static void adjust_speed(float *speed, int dir)
+{
+    float s = floorf(*speed * 10.0f + 0.5f) / 10.0f + 0.1f * (float)dir;
+
+    s = floorf(s * 10.0f + 0.5f) / 10.0f;
+    if (s < 0.5f) s = 0.5f;
+    if (s > 1.5f) s = 1.5f;
+    *speed = s;
+    printf("%-14s %.1f\n", "Speed", s);
+}
+
+/* d-pad / arrows: left-right turn, up-down speed; anything else returns 1 (exit) */
+static int handle_input(const SDL_Event *e, struct walker *wk, float *speed)
 {
     switch (e->type) {
     case SDL_QUIT:
@@ -118,24 +130,20 @@ static int handle_input(const SDL_Event *e, struct walker *wk)
     case SDL_KEYDOWN:
         if (e->key.repeat)
             return 0;
-        if (e->key.keysym.sym == SDLK_LEFT) {
-            walker_turn(wk, -1);
-            return 0;
-        }
-        if (e->key.keysym.sym == SDLK_RIGHT) {
-            walker_turn(wk, 1);
-            return 0;
+        switch (e->key.keysym.sym) {
+        case SDLK_LEFT:  walker_turn(wk, -1);   return 0;
+        case SDLK_RIGHT: walker_turn(wk, 1);    return 0;
+        case SDLK_UP:    adjust_speed(speed, 1);  return 0;
+        case SDLK_DOWN:  adjust_speed(speed, -1); return 0;
         }
         return 1;
 
     case SDL_CONTROLLERBUTTONDOWN:
-        if (e->cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_LEFT) {
-            walker_turn(wk, -1);
-            return 0;
-        }
-        if (e->cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
-            walker_turn(wk, 1);
-            return 0;
+        switch (e->cbutton.button) {
+        case SDL_CONTROLLER_BUTTON_DPAD_LEFT:  walker_turn(wk, -1);   return 0;
+        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: walker_turn(wk, 1);    return 0;
+        case SDL_CONTROLLER_BUTTON_DPAD_UP:    adjust_speed(speed, 1);  return 0;
+        case SDL_CONTROLLER_BUTTON_DPAD_DOWN:  adjust_speed(speed, -1); return 0;
         }
         return 1;
 
@@ -147,15 +155,14 @@ static int handle_input(const SDL_Event *e, struct walker *wk)
     case SDL_JOYHATMOTION:
         if (SDL_GameControllerFromInstanceID(e->jhat.which))
             return 0;
-        if (e->jhat.value == SDL_HAT_LEFT) {
-            walker_turn(wk, -1);
-            return 0;
+        switch (e->jhat.value) {
+        case SDL_HAT_CENTERED: return 0;
+        case SDL_HAT_LEFT:     walker_turn(wk, -1);   return 0;
+        case SDL_HAT_RIGHT:    walker_turn(wk, 1);    return 0;
+        case SDL_HAT_UP:       adjust_speed(speed, 1);  return 0;
+        case SDL_HAT_DOWN:     adjust_speed(speed, -1); return 0;
         }
-        if (e->jhat.value == SDL_HAT_RIGHT) {
-            walker_turn(wk, 1);
-            return 0;
-        }
-        return e->jhat.value != SDL_HAT_CENTERED;
+        return 1;
     }
     return 0;
 }
@@ -317,7 +324,7 @@ int main(int argc, char **argv)
         while (SDL_PollEvent(&e)) {
             if (SDL_GetTicks() - t_start <= INPUT_GRACE)
                 continue;
-            if (handle_input(&e, &wk))
+            if (handle_input(&e, &wk, &cfg.speed))
                 g_running = 0;
         }
 
