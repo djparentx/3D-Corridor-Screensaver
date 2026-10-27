@@ -13,6 +13,7 @@ extern const uint8_t faulty_wav_end[];
 #define MAX_VOICES        4
 #define LIMIT_DB          -3.0f    /* mix ceiling, leaves room for device resampling */
 #define LIMIT_RELEASE_MS  100.0f
+#define HUM_ENABLED       0        /* test: 0 = hum muted, 1 = normal */
 
 struct voice {
     int     active;
@@ -68,7 +69,7 @@ static void callback(void *ud, Uint8 *stream, int len)
 
     for (f = 0; f < frames; f++) {
         for (c = 0; c < g_channels; c++) {
-            s = (float)hum[pos + (Uint32)c];
+            s = HUM_ENABLED ? (float)hum[pos + (Uint32)c] : 0.0f;
 
             for (v = 0; v < MAX_VOICES; v++)
                 if (g_voice[v].active)
