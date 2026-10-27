@@ -351,7 +351,23 @@ int main(int argc, char **argv)
         nev = light_flicker_events(cam_x, cam_z, now, FLICKER_RANGE, ev, MAX_EVENTS);
         for (k = 0; k < nev; k++)
             audio_flicker(ev[k].i, ev[k].j, ev[k].x, ev[k].z);
-        audio_listener(cam_x, cam_z);
+        int32_t gx = (int32_t)floor(cam_x / CELL_SIZE);
+        int32_t gz = (int32_t)floor(cam_z / CELL_SIZE);
+        int n = world_open(gx, gz, DIR_N);
+        int e = world_open(gx, gz, DIR_E);
+        int s = world_open(gx, gz, DIR_S);
+        int w = world_open(gx, gz, DIR_W);
+        double local_x = cam_x - gx * CELL_SIZE;
+        double local_z = cam_z - gz * CELL_SIZE;
+
+        int knock_eligible =
+        	((n && s && !e && !w) || (e && w && !n && !s)) ||
+        	(!w && local_x < 0.25) ||
+        	(!e && CELL_SIZE - local_x < 0.25) ||
+        	(!n && local_z < 0.25) ||
+        	(!s && CELL_SIZE - local_z < 0.25);
+
+        audio_listener(cam_x, cam_z, knock_eligible);
 
         mat4_translate(trans, 0.0f, -(EYE_HEIGHT + walker_bob(&wk)), 0.0f);
         mat4_rotate_y(rot, -wk.yaw);

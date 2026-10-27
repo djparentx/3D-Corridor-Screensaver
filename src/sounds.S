@@ -15,6 +15,13 @@ phone_wav_start:
 phone_wav_end:
 
     .balign 4
+    .global knock_wav_start
+    .global knock_wav_end
+knock_wav_start:
+    .incbin "assets/knock.wav"
+knock_wav_end:
+
+    .balign 4
     .global faulty_wav_start
     .global faulty_wav_end
 faulty_wav_start:

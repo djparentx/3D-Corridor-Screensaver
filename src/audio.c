@@ -9,6 +9,7 @@ extern const uint8_t hum_wav_end[];
 extern const uint8_t faulty_wav_start[];
 extern const uint8_t faulty_wav_end[];
 extern const uint8_t phone_wav_start[], phone_wav_end[];
+extern const uint8_t knock_wav_start[], knock_wav_end[];
 
 #define XFADE_MS          200
 #define MAX_VOICES        4
@@ -61,6 +62,15 @@ static int    g_phone_active;
 static int    g_phone_rings_left;
 static Uint32 g_phone_next_check;
 static Uint32 g_phone_rng;
+static Uint8 *g_knock_buf;
+static const Sint16 *g_knock;
+static Uint32 g_knock_frames;
+static int g_knock_ch;
+static double g_knock_step;
+static float g_knock_scale = 1.0f;
+static double g_knock_pos;
+static int g_knock_active;
+static Uint32 g_knock_next_check;
 
 static Uint32 phone_random(void)
 {
@@ -110,6 +120,20 @@ static void callback(void *ud, Uint8 *stream, int len)
             s = HUM_ENABLED ? (float)hum[pos + (Uint32)c] : 0.0f;
             if (g_phone_active && g_phone)
                 s += phone_sample(g_phone_pos, c) * g_phone_gain;
+            if (g_knock_active && g_knock) {
+                Uint32 frame = (Uint32)g_knock_pos;
+                Uint32 next = frame + 1;
+                float frac = (float)(g_knock_pos - (double)frame);
+                int ch0 = c % g_knock_ch;
+
+                if (next >= g_knock_frames)
+                    next = g_knock_frames - 1;
+
+                s += ((float)g_knock[frame * g_knock_ch + ch0] *
+                      (1.0f - frac) +
+                      (float)g_knock[next * g_knock_ch + ch0] * frac)
+                     * g_knock_scale;
+            }
 
             for (v = 0; v < MAX_VOICES; v++)
                 if (g_voice[v].active)
@@ -154,7 +178,13 @@ static void callback(void *ud, Uint8 *stream, int len)
                 }
             }
         }
-    }
+
+        if (g_knock_active) {
+            g_knock_pos += g_knock_step;
+            if (g_knock_pos >= (double)(g_knock_frames - 1))
+                g_knock_active = 0;
+        }
+	}
     g_pos = pos;
 }
 
@@ -279,6 +309,48 @@ static int load_phone(void)
         return 0;
     }
 
+static int load_knock(void)
+{
+    SDL_AudioSpec spec;
+    SDL_RWops *rw;
+    Uint32 len;
+
+    rw = SDL_RWFromConstMem(knock_wav_start,
+                            (int)(knock_wav_end - knock_wav_start));
+    if (!rw || !SDL_LoadWAV_RW(rw, 1, &spec, &g_knock_buf, &len)) {
+        printf("%-14s %s\n", "KNOCK FAIL", SDL_GetError());
+        g_knock_buf = NULL;
+        return 0;
+    }
+
+    if (spec.format != AUDIO_S16LSB || spec.channels < 1) {
+        printf("%-14s %s\n", "KNOCK FAIL", "wav must be 16-bit PCM");
+        SDL_FreeWAV(g_knock_buf);
+        g_knock_buf = NULL;
+        return 0;
+    }
+
+    g_knock = (const Sint16 *)g_knock_buf;
+    g_knock_ch = spec.channels;
+    g_knock_frames = len / 2 / (Uint32)g_knock_ch;
+    g_knock_step = (double)spec.freq / (double)g_freq;
+
+    if (g_knock_frames < 2) {
+        SDL_FreeWAV(g_knock_buf);
+        g_knock_buf = NULL;
+        g_knock = NULL;
+        return 0;
+    }
+
+    printf("%-14s %d Hz, %d ch, %.1f s, step %.3f\n", "Knock FX",
+           spec.freq, g_knock_ch,
+           (float)g_knock_frames / (float)spec.freq, g_knock_step);
+
+    g_knock_scale = 0.5f / print_peak("Knock peak", g_knock,
+                                     g_knock_frames * (Uint32)g_knock_ch);
+    return 1;
+}
+
     printf("%-14s %d Hz, %d ch, %.1f s, step %.3f\n", "Phone FX",
            spec.freq, g_phone_ch,
            (float)g_phone_frames / (float)spec.freq, g_phone_step);
@@ -339,6 +411,11 @@ int audio_start(int volume)
     g_phone_pos = 0.0;
     g_phone_rings_left = 0;
 
+    if (!load_knock())
+        g_knock = NULL;
+    g_knock_active = 0;
+    g_knock_pos = 0.0;
+
     g_gain = powf(10.0f, (float)((volume - 3) * 3) / 20.0f);
     g_pos  = 0;
     SDL_memset(g_voice, 0, sizeof(g_voice));
@@ -349,7 +426,8 @@ int audio_start(int volume)
     if (!g_phone_rng)
         g_phone_rng = 1;
     g_phone_next_check = SDL_GetTicks() + PHONE_INTERVAL_MS;
-
+    g_knock_next_check = SDL_GetTicks() + 30000;
+	
     SDL_zero(want);
     want.freq     = wav.freq;
     want.format   = AUDIO_S16LSB;
@@ -401,6 +479,11 @@ void audio_stop(void)
         g_phone_buf = NULL;
         g_phone     = NULL;
     }
+    if (g_knock_buf) {
+        SDL_FreeWAV(g_knock_buf);
+        g_knock_buf = NULL;
+        g_knock = NULL;
+    }
 }
 
 void audio_flicker(int32_t pi, int32_t pj, double x, double z)
@@ -431,7 +514,7 @@ void audio_flicker(int32_t pi, int32_t pj, double x, double z)
     SDL_UnlockAudioDevice(g_dev);
 }
 
-void audio_listener(double x, double z)
+void audio_listener(double x, double z, int knock_eligible)
 {
     double d, t;
     int v;
@@ -440,6 +523,13 @@ void audio_listener(double x, double z)
         return;
 
     SDL_LockAudioDevice(g_dev);
+    if ((Sint32)(SDL_GetTicks() - g_knock_next_check) >= 0) {
+        g_knock_next_check = SDL_GetTicks() + 30000;
+        if (g_knock && knock_eligible && phone_random() % 100 < 25) {
+            g_knock_pos = 0.0;
+            g_knock_active = 1;
+        }
+    }
 if (g_phone &&
         (Sint32)(SDL_GetTicks() - g_phone_next_check) >= 0) {
         g_phone_next_check = SDL_GetTicks() + PHONE_INTERVAL_MS;

@@ -8,7 +8,7 @@ SRC  := $(wildcard src/*.c)
 OBJ  := $(SRC:.c=.o) src/sounds.o
 HDR  := $(wildcard src/*.h)
 BIN  := 3D_Corridors
-WAVS := assets/light-hum.wav assets/faulty.wav assets/phone.wav
+WAVS := assets/light-hum.wav assets/faulty.wav assets/phone.wav assets/knock.wav
 
 all: $(BIN)
 
