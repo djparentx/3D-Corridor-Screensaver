@@ -8,6 +8,8 @@ extern const uint8_t hum_wav_start[];
 extern const uint8_t hum_wav_end[];
 extern const uint8_t faulty_wav_start[];
 extern const uint8_t faulty_wav_end[];
+extern const uint8_t glitch_wav_start[];
+extern const uint8_t glitch_wav_end[];
 extern const uint8_t phone_wav_start[], phone_wav_end[];
 extern const uint8_t knock_wav_start[], knock_wav_end[];
 
@@ -23,6 +25,11 @@ struct voice {
     double  x, z;
     double  pos;      /* fractional frame position in fx */
     float   gain;     /* distance gain x fx scale */
+    const   Sint16 *samples;
+    Uint32 frames;
+    int     channels;
+    double  step;
+    float   scale;
 };
 
 static SDL_AudioDeviceID g_dev;
@@ -39,6 +46,12 @@ static int           g_fx_ch;
 static double        g_fx_step;
 static float         g_fx_peak;
 static float         g_fx_scale = 1.0f;
+static Uint8        *g_glitch_buf;
+static const Sint16 *g_glitch;
+static Uint32        g_glitch_frames;
+static int           g_glitch_ch;
+static double        g_glitch_step;
+static float         g_glitch_scale = 1.0f;
 static Uint8        *g_phone_buf;
 static const Sint16 *g_phone;
 static Uint32        g_phone_frames;
@@ -81,6 +94,19 @@ static Uint32 phone_random(void)
 }
 
 static unsigned int g_knock_rng;
+static unsigned int g_glitch_rng;
+
+static unsigned int glitch_random(void)
+{
+    if (!g_glitch_rng)
+        g_glitch_rng = (unsigned int)SDL_GetTicks() ^ 0x85ebca6bu;
+
+    g_glitch_rng ^= g_glitch_rng << 13;
+    g_glitch_rng ^= g_glitch_rng >> 17;
+    g_glitch_rng ^= g_glitch_rng << 5;
+
+    return g_glitch_rng;
+}
 
 static unsigned int knock_random(void)
 {
@@ -97,11 +123,11 @@ static unsigned int knock_random(void)
 /* linear interpolation between neighbouring fx frames */
 static float fx_sample(const struct voice *vc, int c)
 {
-    Uint32 i  = (Uint32)vc->pos;
-    float  t  = (float)(vc->pos - (double)i);
-    int    ch = c % g_fx_ch;
-    float  a  = (float)g_fx[i * (Uint32)g_fx_ch + (Uint32)ch];
-    float  b  = (float)g_fx[(i + 1) * (Uint32)g_fx_ch + (Uint32)ch];
+    Uint32 i = (Uint32)vc->pos;
+    float t = (float)(vc->pos - (double)i);
+    int ch = c % vc->channels;
+    float a = (float)vc->samples[i * (Uint32)vc->channels + (Uint32)ch];
+    float b = (float)vc->samples[(i + 1) * (Uint32)vc->channels + (Uint32)ch];
 
     return a + (b - a) * t;
 }
@@ -151,7 +177,7 @@ static void callback(void *ud, Uint8 *stream, int len)
 
             for (v = 0; v < MAX_VOICES; v++)
                 if (g_voice[v].active)
-                    s += fx_sample(&g_voice[v], c) * g_voice[v].gain;
+                    s += fx_sample(&g_voice[v], c) * g_voice[v].gain * g_voice[v].scale;
 
             s *= g_gain;
 
@@ -175,8 +201,8 @@ static void callback(void *ud, Uint8 *stream, int len)
         for (v = 0; v < MAX_VOICES; v++) {
             if (!g_voice[v].active)
                 continue;
-            g_voice[v].pos += g_fx_step;
-            if (g_voice[v].pos >= (double)(g_fx_frames - 1))
+            g_voice[v].pos += g_voice[v].step;
+            if (g_voice[v].pos >= (double)(g_voice[v].frames - 1))
                 g_voice[v].active = 0;
         }
 
@@ -287,6 +313,48 @@ static int load_fx(void)
     printf("%-14s %d Hz, %d ch, %.1f s, step %.3f\n", "Flicker FX",
            spec.freq, g_fx_ch, (float)g_fx_frames / (float)spec.freq, g_fx_step);
     g_fx_peak = print_peak("FX peak", g_fx, g_fx_frames * (Uint32)g_fx_ch);
+    return 1;
+}
+
+static int load_glitch(void)
+{
+    SDL_AudioSpec spec;
+    SDL_RWops    *rw;
+    Uint32        len;
+
+    rw = SDL_RWFromConstMem(glitch_wav_start,
+                            (int)(glitch_wav_end - glitch_wav_start));
+    if (!rw || !SDL_LoadWAV_RW(rw, 1, &spec, &g_glitch_buf, &len)) {
+        printf("%-14s %s\n", "GLITCH FAIL", SDL_GetError());
+        g_glitch_buf = NULL;
+        return 0;
+    }
+
+    if (spec.format != AUDIO_S16LSB || spec.channels < 1) {
+        printf("%-14s %s\n", "GLITCH FAIL", "wav must be 16-bit PCM");
+        SDL_FreeWAV(g_glitch_buf);
+        g_glitch_buf = NULL;
+        return 0;
+    }
+
+    g_glitch        = (const Sint16 *)g_glitch_buf;
+    g_glitch_ch     = spec.channels;
+    g_glitch_frames = len / 2 / (Uint32)g_glitch_ch;
+    g_glitch_step   = (double)spec.freq / (double)g_freq;
+
+    if (g_glitch_frames < 2) {
+        SDL_FreeWAV(g_glitch_buf);
+        g_glitch_buf = NULL;
+        g_glitch     = NULL;
+        return 0;
+    }
+
+    printf("%-14s %d Hz, %d ch, %.1f s, step %.3f\n", "Glitch FX",
+           spec.freq, g_glitch_ch,
+           (float)g_glitch_frames / (float)spec.freq, g_glitch_step);
+
+    g_glitch_scale = 0.5f / print_peak("Glitch peak", g_glitch,
+                                      g_glitch_frames * (Uint32)g_glitch_ch);
     return 1;
 }
 
@@ -418,7 +486,8 @@ int audio_start(int volume)
         if (g_fx_scale < 0.05f) g_fx_scale = 0.05f;
         printf("%-14s %.1f dB\n", "FX scale", 20.0f * log10f(g_fx_scale));
     }
-
+    load_glitch();
+	
     if (!load_phone())
         g_phone = NULL;
     g_phone_active = 0;
@@ -464,6 +533,11 @@ int audio_start(int volume)
             g_phone_buf = NULL;
             g_phone     = NULL;
         }
+        if (g_glitch_buf) {
+            SDL_FreeWAV(g_glitch_buf);
+            g_glitch_buf = NULL;
+            g_glitch = NULL;
+        }
         return 0;
     }
 
@@ -498,6 +572,11 @@ void audio_stop(void)
         g_knock_buf = NULL;
         g_knock = NULL;
     }
+    if (g_glitch_buf) {
+        SDL_FreeWAV(g_glitch_buf);
+        g_glitch_buf = NULL;
+        g_glitch = NULL;
+    }
 }
 
 void audio_flicker(int32_t pi, int32_t pj, double x, double z)
@@ -516,15 +595,22 @@ void audio_flicker(int32_t pi, int32_t pj, double x, double z)
         if (!g_voice[v].active && slot < 0)
             slot = v;
     }
-    if (slot >= 0) {
-        g_voice[slot].pi     = pi;
-        g_voice[slot].pj     = pj;
-        g_voice[slot].x      = x;
-        g_voice[slot].z      = z;
-        g_voice[slot].pos    = 0.0;
-        g_voice[slot].gain   = 0.0f;
-        g_voice[slot].active = 1;
-    }
+	if (slot >= 0) {
+		int use_glitch = g_glitch && (glitch_random() % 2);
+
+		g_voice[slot].pi       = pi;
+		g_voice[slot].pj       = pj;
+		g_voice[slot].x        = x;
+		g_voice[slot].z        = z;
+		g_voice[slot].pos      = 0.0;
+		g_voice[slot].samples  = use_glitch ? g_glitch : g_fx;
+		g_voice[slot].frames   = use_glitch ? g_glitch_frames : g_fx_frames;
+		g_voice[slot].channels = use_glitch ? g_glitch_ch : g_fx_ch;
+		g_voice[slot].step     = use_glitch ? g_glitch_step : g_fx_step;
+		g_voice[slot].scale    = use_glitch ? g_glitch_scale : g_fx_scale;
+		g_voice[slot].gain     = 0.0f;
+		g_voice[slot].active   = 1;
+	}
     SDL_UnlockAudioDevice(g_dev);
 }
 

@@ -28,4 +28,11 @@ faulty_wav_start:
     .incbin "assets/faulty.wav"
 faulty_wav_end:
 
+    .balign 4
+    .global glitch_wav_start
+    .global glitch_wav_end
+glitch_wav_start:
+    .incbin "assets/glitch.wav"
+glitch_wav_end:
+
     .section .note.GNU-stack,"",%progbits
