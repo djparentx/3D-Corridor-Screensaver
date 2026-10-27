@@ -20,4 +20,5 @@
 
 ## Controls:
 - d-pad left / right - turn 90 degrees
+- d-pad up / down - increase / decrease speed
 - anything else - exit back to EmulationStation
