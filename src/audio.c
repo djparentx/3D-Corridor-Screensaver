@@ -444,7 +444,7 @@ if (g_phone &&
         (Sint32)(SDL_GetTicks() - g_phone_next_check) >= 0) {
         g_phone_next_check = SDL_GetTicks() + PHONE_INTERVAL_MS;
 
-			if (!g_phone_active && phone_random() % 100 < 5) {
+			if (!g_phone_active && phone_random() % 100 < 100) {
 				double angle = (double)phone_random() / 4294967295.0 * 2.0 * M_PI;
 				double distance = 20.0 + (double)phone_random() / 4294967295.0 * 8.0;
 
