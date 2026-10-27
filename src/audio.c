@@ -539,7 +539,7 @@ void audio_listener(double x, double z, int knock_eligible)
     SDL_LockAudioDevice(g_dev);
     if ((Sint32)(SDL_GetTicks() - g_knock_next_check) >= 0) {
         g_knock_next_check = SDL_GetTicks() + 3000;
-        if (g_knock && knock_eligible && knock_random() % 100 < 100) {
+        if (g_knock && knock_eligible && knock_random() % 100 < 33) {
             g_knock_pos = 0.0;
             g_knock_active = 1;
         }
