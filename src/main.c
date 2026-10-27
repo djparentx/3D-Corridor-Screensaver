@@ -354,14 +354,14 @@ int main(int argc, char **argv)
         int32_t gx = (int32_t)floor(cam_x / CELL_SIZE);
         int32_t gz = (int32_t)floor(cam_z / CELL_SIZE);
         int n = world_open(gx, gz, DIR_N);
-        int e = world_open(gx, gz, DIR_E);
+        int east = world_open(gx, gz, DIR_E);
         int s = world_open(gx, gz, DIR_S);
         int w = world_open(gx, gz, DIR_W);
         double local_x = cam_x - gx * CELL_SIZE;
         double local_z = cam_z - gz * CELL_SIZE;
 
         int knock_eligible =
-        	((n && s && !e && !w) || (e && w && !n && !s)) ||
+        	((n && s && !east && !w) || (east && w && !n && !s)) ||
         	(!w && local_x < 0.25) ||
         	(!e && CELL_SIZE - local_x < 0.25) ||
         	(!n && local_z < 0.25) ||

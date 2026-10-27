@@ -308,6 +308,7 @@ static int load_phone(void)
         g_phone     = NULL;
         return 0;
     }
+}
 
 static int load_knock(void)
 {
