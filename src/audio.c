@@ -754,7 +754,7 @@ void audio_pillar_field(int inside)
     if (inside && !g_bang_was_in_pillars) {
         now = SDL_GetTicks();
 
-        if (g_bang && rand() % 100 < 33) {
+        if (g_bang && rand() % 100 < 100) {
             g_bang_due = now + (Uint32)(rand() % 5001);
             g_bang_pending = 1;
         }
