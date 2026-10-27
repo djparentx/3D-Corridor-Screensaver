@@ -344,6 +344,21 @@ int main(int argc, char **argv)
         frac_x = (float)(cam_x - ccx * (double)CHUNK_SIZE);
         frac_z = (float)(cam_z - ccz * (double)CHUNK_SIZE);
 
+		int in_pillar_field = 0;
+		struct chunk *chunks = world_chunks();
+		int i;
+
+		for (i = 0; i < CHUNK_SLOTS; i++) {
+			if (chunks[i].valid &&
+				chunks[i].cx == ccx &&
+				chunks[i].cz == ccz &&
+				chunks[i].type == CHUNK_PILLARS) {
+				in_pillar_field = 1;
+				break;
+			}
+		}
+		audio_pillar_field(in_pillar_field);
+
         gl.ActiveTexture(GL_TEXTURE1);
         light_update(cam_x, cam_z, now, &lo_x, &lo_z);
         gl.ActiveTexture(GL_TEXTURE0);

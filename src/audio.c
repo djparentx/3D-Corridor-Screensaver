@@ -12,6 +12,7 @@ extern const uint8_t glitch_wav_start[];
 extern const uint8_t glitch_wav_end[];
 extern const uint8_t phone_wav_start[], phone_wav_end[];
 extern const uint8_t knock_wav_start[], knock_wav_end[];
+extern const uint8_t bang_wav_start[], bang_wav_end[];
 
 #define XFADE_MS          200
 #define MAX_VOICES        4
@@ -84,6 +85,17 @@ static float g_knock_scale = 1.0f;
 static double g_knock_pos;
 static int g_knock_active;
 static Uint32 g_knock_next_check;
+static Uint8 *g_bang_buf;
+static const Sint16 *g_bang;
+static Uint32 g_bang_frames;
+static int g_bang_ch;
+static double g_bang_step;
+static float g_bang_scale = 1.0f;
+static double g_bang_pos;
+static int g_bang_active;
+static Uint32 g_bang_due;
+static int g_bang_pending;
+static int g_bang_was_in_pillars;
 
 static Uint32 phone_random(void)
 {
@@ -174,6 +186,18 @@ static void callback(void *ud, Uint8 *stream, int len)
                       (float)g_knock[next * g_knock_ch + ch0] * frac)
                      * g_knock_scale;
             }
+			if (g_bang_active && g_bang) {
+				Uint32 frame = (Uint32)g_bang_pos;
+				Uint32 next = frame + 1;
+				float frac = (float)(g_bang_pos - (double)frame);
+				int ch0 = c % g_bang_ch;
+				if (next >= g_bang_frames)
+					next = g_bang_frames - 1;
+				s += ((float)g_bang[frame * g_bang_ch + ch0] *
+					  (1.0f - frac) +
+					  (float)g_bang[next * g_bang_ch + ch0] * frac)
+					 * g_bang_scale;
+			}
 
             for (v = 0; v < MAX_VOICES; v++)
                 if (g_voice[v].active)
@@ -223,6 +247,12 @@ static void callback(void *ud, Uint8 *stream, int len)
             g_knock_pos += g_knock_step;
             if (g_knock_pos >= (double)(g_knock_frames - 1))
                 g_knock_active = 0;
+        }
+
+        if (g_bang_active) {
+            g_bang_pos += g_bang_step;
+            if (g_bang_pos >= (double)(g_bang_frames - 1))
+                g_bang_active = 0;
         }
 	}
     g_pos = pos;
@@ -442,6 +472,48 @@ static int load_knock(void)
     return 1;
 }
 
+static int load_bang(void)
+{
+    SDL_AudioSpec spec;
+    SDL_RWops *rw;
+    Uint32 len;
+
+    rw = SDL_RWFromConstMem(bang_wav_start,
+                            (int)(bang_wav_end - bang_wav_start));
+    if (!rw || !SDL_LoadWAV_RW(rw, 1, &spec, &g_bang_buf, &len)) {
+        printf("%-14s %s\n", "BANG FAIL", SDL_GetError());
+        g_bang_buf = NULL;
+        return 0;
+    }
+
+    if (spec.format != AUDIO_S16LSB || spec.channels < 1) {
+        printf("%-14s %s\n", "BANG FAIL", "wav must be 16-bit PCM");
+        SDL_FreeWAV(g_bang_buf);
+        g_bang_buf = NULL;
+        return 0;
+    }
+
+    g_bang = (const Sint16 *)g_bang_buf;
+    g_bang_ch = spec.channels;
+    g_bang_frames = len / 2 / (Uint32)g_bang_ch;
+    g_bang_step = (double)spec.freq / (double)g_freq;
+
+    if (g_bang_frames < 2) {
+        SDL_FreeWAV(g_bang_buf);
+        g_bang_buf = NULL;
+        g_bang = NULL;
+        return 0;
+    }
+
+    printf("%-14s %d Hz, %d ch, %.1f s, step %.3f\n", "Bang FX",
+           spec.freq, g_bang_ch,
+           (float)g_bang_frames / (float)spec.freq, g_bang_step);
+
+    g_bang_scale = 0.5f / print_peak("Bang peak", g_bang,
+                                     g_bang_frames * (Uint32)g_bang_ch);
+    return 1;
+}
+
 int audio_start(int volume)
 {
     SDL_AudioSpec wav, want, have;
@@ -487,6 +559,7 @@ int audio_start(int volume)
         printf("%-14s %.1f dB\n", "FX scale", 20.0f * log10f(g_fx_scale));
     }
     load_glitch();
+    load_bang();
 	
     if (!load_phone())
         g_phone = NULL;
@@ -572,6 +645,11 @@ void audio_stop(void)
         g_knock_buf = NULL;
         g_knock = NULL;
     }
+	if (g_bang_buf) {
+		SDL_FreeWAV(g_bang_buf);
+		g_bang_buf = NULL;
+		g_bang = NULL;
+	}
     if (g_glitch_buf) {
         SDL_FreeWAV(g_glitch_buf);
         g_glitch_buf = NULL;
@@ -663,5 +741,36 @@ if (g_phone &&
             t = 0.0;
         g_phone_gain = (float)(t * t) * g_phone_scale;
     }
+    SDL_UnlockAudioDevice(g_dev);
+}
+
+void audio_pillar_field(int inside)
+{
+    Uint32 now;
+    if (!g_dev) return;
+
+    SDL_LockAudioDevice(g_dev);
+
+    if (inside && !g_bang_was_in_pillars) {
+        now = SDL_GetTicks();
+
+        if (g_bang && rand() % 100 < 33) {
+            g_bang_due = now + (Uint32)(rand() % 5001);
+            g_bang_pending = 1;
+        }
+    }
+
+    if (!inside)
+        g_bang_pending = 0;
+
+    g_bang_was_in_pillars = inside;
+
+    if (g_bang_pending &&
+        (Sint32)(SDL_GetTicks() - g_bang_due) >= 0) {
+        g_bang_pos = 0.0;
+        g_bang_active = 1;
+        g_bang_pending = 0;
+    }
+
     SDL_UnlockAudioDevice(g_dev);
 }

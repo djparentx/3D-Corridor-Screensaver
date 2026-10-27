@@ -14,5 +14,6 @@ void audio_flicker(int32_t pi, int32_t pj, double x, double z);
 
 /* update flicker voice gains from the camera position */
 void audio_listener(double x, double z, int knock_eligible);
+void audio_pillar_field(int inside);
 
 #endif

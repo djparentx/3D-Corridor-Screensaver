@@ -22,6 +22,13 @@ knock_wav_start:
 knock_wav_end:
 
     .balign 4
+    .global bang_wav_start
+    .global bang_wav_end
+bang_wav_start:
+    .incbin "assets/bang.wav"
+bang_wav_end:
+
+    .balign 4
     .global faulty_wav_start
     .global faulty_wav_end
 faulty_wav_start:
