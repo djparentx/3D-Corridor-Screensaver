@@ -308,6 +308,14 @@ static int load_phone(void)
         g_phone     = NULL;
         return 0;
     }
+
+    printf("%-14s %d Hz, %d ch, %.1f s, step %.3f\n", "Phone FX",
+           spec.freq, g_phone_ch,
+           (float)g_phone_frames / (float)spec.freq, g_phone_step);
+
+    g_phone_scale = 0.5f / print_peak("Phone peak", g_phone,
+                                     g_phone_frames * (Uint32)g_phone_ch);
+    return 1;
 }
 
 static int load_knock(void)
@@ -349,15 +357,6 @@ static int load_knock(void)
 
     g_knock_scale = 0.5f / print_peak("Knock peak", g_knock,
                                      g_knock_frames * (Uint32)g_knock_ch);
-    return 1;
-}
-
-    printf("%-14s %d Hz, %d ch, %.1f s, step %.3f\n", "Phone FX",
-           spec.freq, g_phone_ch,
-           (float)g_phone_frames / (float)spec.freq, g_phone_step);
-
-    g_phone_scale = 0.5f / print_peak("Phone peak", g_phone,
-                                     g_phone_frames * (Uint32)g_phone_ch);
     return 1;
 }
 

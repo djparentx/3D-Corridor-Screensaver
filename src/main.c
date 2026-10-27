@@ -363,7 +363,7 @@ int main(int argc, char **argv)
         int knock_eligible =
         	((n && s && !east && !w) || (east && w && !n && !s)) ||
         	(!w && local_x < 0.25) ||
-        	(!e && CELL_SIZE - local_x < 0.25) ||
+        	(!east && CELL_SIZE - local_x < 0.25) ||
         	(!n && local_z < 0.25) ||
         	(!s && CELL_SIZE - local_z < 0.25);
 
