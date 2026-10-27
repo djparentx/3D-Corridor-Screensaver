@@ -80,6 +80,20 @@ static Uint32 phone_random(void)
     return g_phone_rng;
 }
 
+static unsigned int g_knock_rng;
+
+static unsigned int knock_random(void)
+{
+    if (!g_knock_rng)
+        g_knock_rng = (unsigned int)SDL_GetTicks() ^ 0x9e3779b9u;
+
+    g_knock_rng ^= g_knock_rng << 13;
+    g_knock_rng ^= g_knock_rng >> 17;
+    g_knock_rng ^= g_knock_rng << 5;
+
+    return g_knock_rng;
+}
+
 /* linear interpolation between neighbouring fx frames */
 static float fx_sample(const struct voice *vc, int c)
 {
@@ -525,7 +539,7 @@ void audio_listener(double x, double z, int knock_eligible)
     SDL_LockAudioDevice(g_dev);
     if ((Sint32)(SDL_GetTicks() - g_knock_next_check) >= 0) {
         g_knock_next_check = SDL_GetTicks() + 30000;
-        if (g_knock && knock_eligible && phone_random() % 100 < 25) {
+        if (g_knock && knock_eligible && knock_random() % 100 < 100) {
             g_knock_pos = 0.0;
             g_knock_active = 1;
         }
