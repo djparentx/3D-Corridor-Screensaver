@@ -8,6 +8,13 @@ hum_wav_start:
 hum_wav_end:
 
     .balign 4
+    .global phone_wav_start
+    .global phone_wav_end
+phone_wav_start:
+    .incbin "assets/phone.wav"
+phone_wav_end:
+
+    .balign 4
     .global faulty_wav_start
     .global faulty_wav_end
 faulty_wav_start:
