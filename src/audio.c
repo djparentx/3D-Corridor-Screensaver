@@ -9,15 +9,17 @@ extern const uint8_t hum_wav_end[];
 extern const uint8_t faulty_wav_start[];
 extern const uint8_t faulty_wav_end[];
 
-#define XFADE_MS    200
-#define MAX_VOICES  4
+#define XFADE_MS          200
+#define MAX_VOICES        4
+#define LIMIT_DB          -3.0f    /* mix ceiling, leaves room for device resampling */
+#define LIMIT_RELEASE_MS  100.0f
 
 struct voice {
     int     active;
     int32_t pi, pj;
     double  x, z;
     double  pos;      /* fractional frame position in fx */
-    float   gain;
+    float   gain;     /* distance gain x fx scale */
 };
 
 static SDL_AudioDeviceID g_dev;
@@ -32,7 +34,12 @@ static const Sint16 *g_fx;
 static Uint32        g_fx_frames;
 static int           g_fx_ch;
 static double        g_fx_step;
+static float         g_fx_peak;
+static float         g_fx_scale = 1.0f;
 static float         g_gain;
+static float         g_lim      = 1.0f;
+static float         g_lim_thr;
+static float         g_lim_rel;
 static struct voice  g_voice[MAX_VOICES];
 
 /* linear interpolation between neighbouring fx frames */
@@ -47,7 +54,7 @@ static float fx_sample(const struct voice *vc, int c)
     return a + (b - a) * t;
 }
 
-/* hum loop + flicker one-shots, master gain */
+/* hum loop + flicker one-shots, master gain, peak limiter */
 static void callback(void *ud, Uint8 *stream, int len)
 {
     Sint16       *out    = (Sint16 *)stream;
@@ -55,7 +62,7 @@ static void callback(void *ud, Uint8 *stream, int len)
     int           frames = len / 2 / g_channels;
     Uint32        pos    = g_pos;
     int           f, c, v;
-    float         s;
+    float         s, a;
 
     (void)ud;
 
@@ -68,6 +75,15 @@ static void callback(void *ud, Uint8 *stream, int len)
                     s += fx_sample(&g_voice[v], c) * g_voice[v].gain;
 
             s *= g_gain;
+
+            /* instant attack, smooth release */
+            a = fabsf(s);
+            if (a * g_lim > g_lim_thr)
+                g_lim = g_lim_thr / a;
+            else
+                g_lim += (1.0f - g_lim) * g_lim_rel;
+            s *= g_lim;
+
             if (s >  32767.0f) s =  32767.0f;
             if (s < -32768.0f) s = -32768.0f;
             *out++ = (Sint16)s;
@@ -119,7 +135,8 @@ static void crossfade_loop(int channels, int freq)
     g_loop = keep * (Uint32)channels;
 }
 
-static void print_peak(const char *label, const Sint16 *s, Uint32 count)
+/* prints and returns peak as 0..1 of full scale */
+static float print_peak(const char *label, const Sint16 *s, Uint32 count)
 {
     Uint32 i;
     int    a, peak = 0;
@@ -133,6 +150,7 @@ static void print_peak(const char *label, const Sint16 *s, Uint32 count)
         printf("%-14s %s\n", label, "silent");
     else
         printf("%-14s %.1f dBFS\n", label, 20.0 * log10((double)peak / 32768.0));
+    return (float)peak / 32768.0f;
 }
 
 /* faulty.wav stays at its own rate; resampled in the callback */
@@ -170,7 +188,7 @@ static int load_fx(void)
 
     printf("%-14s %d Hz, %d ch, %.1f s, step %.3f\n", "Flicker FX",
            spec.freq, g_fx_ch, (float)g_fx_frames / (float)spec.freq, g_fx_step);
-    print_peak("FX peak", g_fx, g_fx_frames * (Uint32)g_fx_ch);
+    g_fx_peak = print_peak("FX peak", g_fx, g_fx_frames * (Uint32)g_fx_ch);
     return 1;
 }
 
@@ -178,6 +196,7 @@ int audio_start(int volume)
 {
     SDL_AudioSpec wav, want, have;
     SDL_RWops *rw;
+    float hum_peak, target;
 
     if (volume <= 0)
         return 0;
@@ -203,8 +222,20 @@ int audio_start(int volume)
     g_freq     = wav.freq;
     g_channels = wav.channels;
     crossfade_loop(wav.channels, wav.freq);
-    print_peak("Hum peak", (const Sint16 *)g_wav, g_loop);
-    load_fx();
+    hum_peak = print_peak("Hum peak", (const Sint16 *)g_wav, g_loop);
+
+    target    = powf(10.0f, LIMIT_DB / 20.0f);
+    g_lim_thr = target * 32768.0f;
+    g_lim_rel = 1.0f - expf(-1.0f / (LIMIT_RELEASE_MS / 1000.0f *
+                                     (float)g_freq * (float)g_channels));
+    g_lim     = 1.0f;
+
+    if (load_fx() && g_fx_peak > 0.0f) {
+        g_fx_scale = (target - hum_peak) / g_fx_peak;
+        if (g_fx_scale > 1.0f)  g_fx_scale = 1.0f;
+        if (g_fx_scale < 0.05f) g_fx_scale = 0.05f;
+        printf("%-14s %.1f dB\n", "FX scale", 20.0f * log10f(g_fx_scale));
+    }
 
     g_gain = powf(10.0f, (float)((volume - 3) * 3) / 20.0f);
     g_pos  = 0;
@@ -297,7 +328,7 @@ void audio_listener(double x, double z)
         t = 1.0 - d / FLICKER_RANGE;
         if (t < 0.0)
             t = 0.0;
-        g_voice[v].gain = (float)(t * t);
+        g_voice[v].gain = (float)(t * t) * g_fx_scale;
     }
     SDL_UnlockAudioDevice(g_dev);
 }
