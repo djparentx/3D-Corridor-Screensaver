@@ -13,7 +13,7 @@ extern const uint8_t faulty_wav_end[];
 #define MAX_VOICES        4
 #define LIMIT_DB          -3.0f    /* mix ceiling, leaves room for device resampling */
 #define LIMIT_RELEASE_MS  100.0f
-#define HUM_ENABLED       0        /* test: 0 = hum muted, 1 = normal */
+#define HUM_ENABLED       1        /* test: 0 = hum muted, 1 = normal */
 
 struct voice {
     int     active;
