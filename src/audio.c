@@ -713,7 +713,7 @@ void audio_listener(double x, double z, int knock_eligible)
     SDL_LockAudioDevice(g_dev);
     if ((Sint32)(SDL_GetTicks() - g_knock_next_check) >= 0) {
         g_knock_next_check = SDL_GetTicks() + 3000;
-        if (g_knock && knock_eligible && knock_random() % 100 < 25) {
+        if (g_knock && knock_eligible && knock_random() % 100 < 20) {
             g_knock_pos = 0.0;
             g_knock_active = 1;
         }
@@ -764,7 +764,7 @@ void audio_pillar_field(int inside)
     if (inside && !g_bang_was_in_pillars) {
         now = SDL_GetTicks();
 
-        if (g_bang && phone_random() % 100 < 30) {
+        if (g_bang && phone_random() % 100 < 15) {
             g_bang_due = now + phone_random() % 5001;
             g_bang_pending = 1;
         }
