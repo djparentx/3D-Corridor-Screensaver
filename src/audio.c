@@ -304,7 +304,7 @@ static float print_peak(const char *label, const Sint16 *s, Uint32 count)
         printf("%-14s %s\n", label, "silent");
     else
         printf("%-14s %.1f dBFS\n", label, 20.0 * log10((double)peak / 32768.0));
-    return (float)peak / 32768.0f;
+    return peak == 0 ? 1.0f : (float)peak / 32768.0f;
 }
 
 /* faulty.wav stays at its own rate; resampled in the callback */
@@ -606,6 +606,16 @@ int audio_start(int volume)
             g_phone_buf = NULL;
             g_phone     = NULL;
         }
+        if (g_knock_buf) {
+            SDL_FreeWAV(g_knock_buf);
+            g_knock_buf = NULL;
+            g_knock     = NULL;
+        }
+        if (g_bang_buf) {
+            SDL_FreeWAV(g_bang_buf);
+            g_bang_buf = NULL;
+            g_bang     = NULL;
+        }
         if (g_glitch_buf) {
             SDL_FreeWAV(g_glitch_buf);
             g_glitch_buf = NULL;
@@ -732,7 +742,7 @@ if (g_phone &&
         t = 1.0 - d / FLICKER_RANGE;
         if (t < 0.0)
             t = 0.0;
-        g_voice[v].gain = (float)(t * t) * g_fx_scale;
+        g_voice[v].gain = (float)(t * t);
     }
     if (g_phone_active) {
         d = hypot(g_phone_x - x, g_phone_z - z);
@@ -754,8 +764,8 @@ void audio_pillar_field(int inside)
     if (inside && !g_bang_was_in_pillars) {
         now = SDL_GetTicks();
 
-        if (g_bang && rand() % 100 < 50) {
-            g_bang_due = now + (Uint32)(rand() % 5001);
+        if (g_bang && phone_random() % 100 < 30) {
+            g_bang_due = now + phone_random() % 5001;
             g_bang_pending = 1;
         }
     }

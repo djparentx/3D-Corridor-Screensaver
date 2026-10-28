@@ -17,6 +17,7 @@
 #
 # Controls:
 #   d-pad left / right   turn 90 degrees
+#   d-pad up / down      speed +0.1 / -0.1 (0.5 - 1.5)
 #   anything else        exit back to EmulationStation
 #
 
@@ -25,7 +26,7 @@ BRIGHTNESS=50
 AMBIENT=25
 PANELS=2
 FLICKER=3
-FOG=1
+FOG=2
 VOLUME=3
 
 DIR="$(cd "$(dirname "$0")" && pwd)"

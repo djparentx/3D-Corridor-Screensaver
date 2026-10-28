@@ -167,6 +167,31 @@ static int handle_input(const SDL_Event *e, struct walker *wk, float *speed)
     return 0;
 }
 
+static int line_clear(double x0, double z0, double x1, double z1)
+{
+    double dx = x1 - x0, dz = z1 - z0;
+    int steps = (int)(hypot(dx, dz) / 0.5) + 1;
+    int32_t gx = (int32_t)floor(x0 / CELL_SIZE);
+    int32_t gz = (int32_t)floor(z0 / CELL_SIZE);
+    int s;
+
+    for (s = 1; s <= steps; s++) {
+        double t = (double)s / steps;
+        int32_t nx = (int32_t)floor((x0 + dx * t) / CELL_SIZE);
+        int32_t nz = (int32_t)floor((z0 + dz * t) / CELL_SIZE);
+
+        while (gx != nx || gz != nz) {
+            if (gx != nx && world_open(gx, gz, nx > gx ? DIR_E : DIR_W))
+                gx += nx > gx ? 1 : -1;
+            else if (gz != nz && world_open(gx, gz, nz > gz ? DIR_S : DIR_N))
+                gz += nz > gz ? 1 : -1;
+            else
+                return 0;
+        }
+    }
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     static const float quad[] = { -1, -1,  1, -1,  -1, 1,  1, 1 };
@@ -345,16 +370,31 @@ int main(int argc, char **argv)
         frac_z = (float)(cam_z - ccz * (double)CHUNK_SIZE);
 
 		int in_pillar_field = 0;
-		struct chunk *chunks = world_chunks();
-		int i;
+		double fx = -sin(wk.yaw), fz = -cos(wk.yaw);
+		int pc, px, pz;
 
-		for (i = 0; i < CHUNK_SLOTS; i++) {
-			if (chunks[i].valid &&
-				chunks[i].cx == ccx &&
-				chunks[i].cz == ccz &&
-				chunks[i].type == CHUNK_PILLARS) {
+		chunks = world_chunks();
+		for (pc = 0; pc < CHUNK_SLOTS && !in_pillar_field; pc++) {
+			if (!chunks[pc].valid || chunks[pc].type != CHUNK_PILLARS)
+				continue;
+			if (chunks[pc].cx == ccx && chunks[pc].cz == ccz) {
 				in_pillar_field = 1;
 				break;
+			}
+			for (pz = 0; pz < 3 && !in_pillar_field; pz++) {
+				for (px = 0; px < 3; px++) {
+					double tx = (chunks[pc].cx + 0.05 + px * 0.45) * CHUNK_SIZE;
+					double tz = (chunks[pc].cz + 0.05 + pz * 0.45) * CHUNK_SIZE;
+					double dx = tx - cam_x;
+					double dz = tz - cam_z;
+					double d  = hypot(dx, dz);
+
+					if (d < 40.0 && (dx * fx + dz * fz) / d > 0.7071 &&
+					    line_clear(cam_x, cam_z, tx, tz)) {
+						in_pillar_field = 1;
+						break;
+					}
+				}
 			}
 		}
 		audio_pillar_field(in_pillar_field);
@@ -371,13 +411,13 @@ int main(int argc, char **argv)
         int n = world_open(gx, gz, DIR_N);
         int east = world_open(gx, gz, DIR_E);
         int s = world_open(gx, gz, DIR_S);
-        int w = world_open(gx, gz, DIR_W);
+        int west = world_open(gx, gz, DIR_W);
         double local_x = cam_x - gx * CELL_SIZE;
         double local_z = cam_z - gz * CELL_SIZE;
 
         int knock_eligible =
-        	((n && s && !east && !w) || (east && w && !n && !s)) ||
-        	(!w && local_x < 0.25) ||
+        	((n && s && !east && !west) || (east && west && !n && !s)) ||
+        	(!west && local_x < 0.25) ||
         	(!east && CELL_SIZE - local_x < 0.25) ||
         	(!n && local_z < 0.25) ||
         	(!s && CELL_SIZE - local_z < 0.25);
